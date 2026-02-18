@@ -11,6 +11,8 @@ obj/
 # FFmpeg tools
 Mp3Converter/tools/ffmpeg.exe
 Mp3Converter/tools/ffprobe.exe
+Mp3Converter/tools/temp_extract/
+Mp3Converter/tools/ffmpeg.zip
 
 # OS generated files
 Thumbs.db

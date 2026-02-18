@@ -43,6 +43,12 @@ namespace Mp3Converter.ViewModels
         [ObservableProperty]
         private string _logText = "";
 
+        [ObservableProperty]
+        private bool _isDownloadingFfmpeg;
+
+        [ObservableProperty]
+        private double _downloadProgress;
+
         public MainViewModel()
         {
             _ffmpegService = new FfmpegService();
@@ -51,9 +57,46 @@ namespace Mp3Converter.ViewModels
 
             BindingOperations.EnableCollectionSynchronization(Items, _lock);
 
+            // Check for FFmpeg asynchronously on startup
+            CheckAndDownloadFfmpeg();
+        }
+
+        private async void CheckAndDownloadFfmpeg()
+        {
             if (!_ffmpegService.CheckFfmpegExists())
             {
-                Log("ERROR: ffmpeg.exe not found. Please place it in the 'tools' folder.");
+                var result = MessageBox.Show("FFmpeg tools are missing. Do you want to download them automatically? (Required for conversion)", "Missing Components", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                
+                if (result == MessageBoxResult.Yes)
+                {
+                    IsDownloadingFfmpeg = true;
+                    Log("Downloading FFmpeg tools... This may take a few minutes.");
+                    
+                    try
+                    {
+                        var progress = new Progress<double>(p => 
+                        {
+                            if (p > 100) DownloadProgress = 100; // Extraction phase
+                            else DownloadProgress = p;
+                        });
+
+                        await _ffmpegService.DownloadFfmpegAsync(progress, CancellationToken.None);
+                        Log("FFmpeg downloaded and installed successfully.");
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Error downloading FFmpeg: {ex.Message}");
+                        MessageBox.Show($"Failed to download FFmpeg: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                    finally
+                    {
+                        IsDownloadingFfmpeg = false;
+                    }
+                }
+                else
+                {
+                    Log("ERROR: ffmpeg.exe not found. Please place it in the 'tools' folder manually.");
+                }
             }
             else
             {

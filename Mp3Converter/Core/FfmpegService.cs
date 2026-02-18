@@ -5,23 +5,96 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
+using System.IO.Compression;
+using System.Net.Http;
+
 namespace Mp3Converter.Core
 {
     public class FfmpegService
     {
         private readonly string _ffmpegPath;
         private readonly string _ffprobePath;
+        private readonly string _toolsDir;
 
         public FfmpegService()
         {
             string appDir = AppDomain.CurrentDomain.BaseDirectory;
-            _ffmpegPath = Path.Combine(appDir, "tools", "ffmpeg.exe");
-            _ffprobePath = Path.Combine(appDir, "tools", "ffprobe.exe");
+            _toolsDir = Path.Combine(appDir, "tools");
+            _ffmpegPath = Path.Combine(_toolsDir, "ffmpeg.exe");
+            _ffprobePath = Path.Combine(_toolsDir, "ffprobe.exe");
         }
 
         public bool CheckFfmpegExists()
         {
-            return File.Exists(_ffmpegPath);
+            return File.Exists(_ffmpegPath) && File.Exists(_ffprobePath);
+        }
+
+        public async Task DownloadFfmpegAsync(IProgress<double> progress, CancellationToken ct)
+        {
+            Directory.CreateDirectory(_toolsDir);
+            
+            // Using a reliable release from GitHub (BtbN) - smaller and reliable
+            // Note: This URL might change over time, ideally we should query the GitHub API for latest release asset.
+            // But for simplicity and stability, let's use a known recent version or the "latest" redirect.
+            string url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
+            string zipPath = Path.Combine(_toolsDir, "ffmpeg.zip");
+
+            using (var client = new HttpClient())
+            {
+                using (var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct))
+                {
+                    response.EnsureSuccessStatusCode();
+                    var totalBytes = response.Content.Headers.ContentLength ?? 100 * 1024 * 1024; // Guess 100MB if unknown
+
+                    using (var stream = await response.Content.ReadAsStreamAsync(ct))
+                    using (var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    {
+                        var buffer = new byte[8192];
+                        var isMoreToRead = true;
+                        var totalRead = 0L;
+
+                        do
+                        {
+                            var read = await stream.ReadAsync(buffer, 0, buffer.Length, ct);
+                            if (read == 0)
+                            {
+                                isMoreToRead = false;
+                            }
+                            else
+                            {
+                                await fileStream.WriteAsync(buffer, 0, read, ct);
+                                totalRead += read;
+                                progress?.Report((double)totalRead / totalBytes * 100);
+                            }
+                        } while (isMoreToRead);
+                    }
+                }
+            }
+
+            // Extract
+            progress?.Report(101); // Indicating extraction
+            
+            // Unzip to temp folder
+            string extractPath = Path.Combine(_toolsDir, "temp_extract");
+            if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
+            Directory.CreateDirectory(extractPath);
+
+            ZipFile.ExtractToDirectory(zipPath, extractPath);
+
+            // Find ffmpeg.exe and ffprobe.exe in the extracted folders
+            var binFiles = Directory.GetFiles(extractPath, "ffmpeg.exe", SearchOption.AllDirectories);
+            if (binFiles.Length > 0) File.Copy(binFiles[0], _ffmpegPath, true);
+
+            var probeFiles = Directory.GetFiles(extractPath, "ffprobe.exe", SearchOption.AllDirectories);
+            if (probeFiles.Length > 0) File.Copy(probeFiles[0], _ffprobePath, true);
+
+            // Cleanup
+            try
+            {
+                File.Delete(zipPath);
+                Directory.Delete(extractPath, true);
+            }
+            catch { }
         }
 
         public string GetFfmpegPath() => _ffmpegPath;

@@ -4,20 +4,10 @@ A fast, reliable Windows desktop application for batch converting MP4, M4A, and 
 
 ## Prerequisites
 
-1.  **FFmpeg**: The necessary `ffmpeg.exe` and `ffprobe.exe` tools are **not included** in the repository due to file size limits.
-    -   You **must** download them manually if you clone this repository.
-    -   Download from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/) (release essentials or full).
-    -   Extract the zip.
-    -   Copy `ffmpeg.exe` and `ffprobe.exe` from the `bin` folder to the `Mp3Converter/tools` folder in this project.
-    -   The structure should look like:
-        ```
-        Mp3Converter/
-        ├── tools/
-        │   ├── ffmpeg.exe
-        │   ├── ffprobe.exe
-        │   └── README.txt
-        ├── ...
-        ```
+1.  **FFmpeg**: 
+    -   The application **automatically checks** for `ffmpeg.exe` and `ffprobe.exe` on startup.
+    -   If they are missing (e.g., first run after cloning), the app will offer to **automatically download and install** them for you.
+    -   You can also manually place them in the `Mp3Converter/tools` folder if you prefer.
 
 ## How to Build and Run
 
