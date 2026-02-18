@@ -1,0 +1,17 @@
+# .NET
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.sln.docstates
+*.log
+*.zip
+
+# FFmpeg tools
+Mp3Converter/tools/ffmpeg.exe
+Mp3Converter/tools/ffprobe.exe
+
+# OS generated files
+Thumbs.db
+.DS_Store

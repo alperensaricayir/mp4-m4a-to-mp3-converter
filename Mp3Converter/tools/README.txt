@@ -1,0 +1,1 @@
+This folder should contain ffmpeg.exe and ffprobe.exe
