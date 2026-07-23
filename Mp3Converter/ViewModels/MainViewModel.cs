@@ -56,51 +56,60 @@ namespace Mp3Converter.ViewModels
             OutputFolder = Path.Combine(docPath, "Mp3ConverterOutput");
 
             BindingOperations.EnableCollectionSynchronization(Items, _lock);
-
-            // Check for FFmpeg asynchronously on startup
-            CheckAndDownloadFfmpeg();
         }
 
-        private async void CheckAndDownloadFfmpeg()
+        /// <summary>
+        /// Must run after the main window is visible. Showing a MessageBox during
+        /// construction prevents the window from appearing on screen.
+        /// </summary>
+        public async Task InitializeAsync()
         {
-            if (!_ffmpegService.CheckFfmpegExists())
-            {
-                var result = MessageBox.Show("FFmpeg tools are missing. Do you want to download them automatically? (Required for conversion)", "Missing Components", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                
-                if (result == MessageBoxResult.Yes)
-                {
-                    IsDownloadingFfmpeg = true;
-                    Log("Downloading FFmpeg tools... This may take a few minutes.");
-                    
-                    try
-                    {
-                        var progress = new Progress<double>(p => 
-                        {
-                            if (p > 100) DownloadProgress = 100; // Extraction phase
-                            else DownloadProgress = p;
-                        });
-
-                        await _ffmpegService.DownloadFfmpegAsync(progress, CancellationToken.None);
-                        Log("FFmpeg downloaded and installed successfully.");
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"Error downloading FFmpeg: {ex.Message}");
-                        MessageBox.Show($"Failed to download FFmpeg: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                    }
-                    finally
-                    {
-                        IsDownloadingFfmpeg = false;
-                    }
-                }
-                else
-                {
-                    Log("ERROR: ffmpeg.exe not found. Please place it in the 'tools' folder manually.");
-                }
-            }
-            else
+            if (_ffmpegService.CheckFfmpegExists())
             {
                 Log("Ready. FFmpeg found.");
+                return;
+            }
+
+            var result = MessageBox.Show(
+                Application.Current.MainWindow,
+                "FFmpeg tools are missing. Do you want to download them automatically? (Required for conversion)",
+                "Missing Components",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result != MessageBoxResult.Yes)
+            {
+                Log("ERROR: ffmpeg.exe not found. Please place it in the 'tools' folder manually.");
+                return;
+            }
+
+            IsDownloadingFfmpeg = true;
+            Log("Downloading FFmpeg tools... This may take a few minutes.");
+
+            try
+            {
+                var progress = new Progress<double>(p =>
+                {
+                    if (p > 100) DownloadProgress = 100; // Extraction phase
+                    else DownloadProgress = p;
+                });
+
+                await _ffmpegService.DownloadFfmpegAsync(progress, CancellationToken.None);
+                Log("FFmpeg downloaded and installed successfully.");
+            }
+            catch (Exception ex)
+            {
+                Log($"Error downloading FFmpeg: {ex.Message}");
+                MessageBox.Show(
+                    Application.Current.MainWindow,
+                    $"Failed to download FFmpeg: {ex.Message}",
+                    "Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsDownloadingFfmpeg = false;
             }
         }
 

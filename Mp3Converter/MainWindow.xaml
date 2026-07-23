@@ -5,9 +5,13 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:Mp3Converter.ViewModels"
         xmlns:core="clr-namespace:Mp3Converter.Core"
+        xmlns:sys="clr-namespace:System;assembly=System.Runtime"
         mc:Ignorable="d"
         Title="MP4/M4A to MP3 Converter" Height="600" Width="900"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        WindowState="Normal"
+        ShowInTaskbar="True"
+        Visibility="Visible">
     
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
@@ -24,7 +28,10 @@
 
         <!-- Download Overlay -->
         <Grid Grid.RowSpan="5" Background="#AAFFFFFF" Panel.ZIndex="1000" Visibility="{Binding IsDownloadingFfmpeg, Converter={StaticResource BoolToVis}}">
-            <Border Background="White" BorderBrush="Gray" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="20" CornerRadius="5" Effect="{DynamicResource {x:Static SystemParameters.DropShadowKey}}">
+            <Border Background="White" BorderBrush="Gray" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="20" CornerRadius="5">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="12" ShadowDepth="3" Opacity="0.35"/>
+                </Border.Effect>
                 <StackPanel Width="300">
                     <TextBlock Text="Downloading FFmpeg..." FontWeight="Bold" HorizontalAlignment="Center" Margin="0,0,0,10"/>
                     <ProgressBar Value="{Binding DownloadProgress}" Maximum="100" Height="20" Margin="0,0,0,5"/>
@@ -96,11 +103,11 @@
                     
                     <StackPanel Orientation="Horizontal" IsEnabled="{Binding QualitySettings.IsCbr}">
                         <TextBlock Text="Bitrate:" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                        <ComboBox SelectedValue="{Binding QualitySettings.Bitrate}" SelectedValuePath="Content" Width="80">
-                            <ComboBoxItem Content="128"/>
-                            <ComboBoxItem Content="192"/>
-                            <ComboBoxItem Content="256"/>
-                            <ComboBoxItem Content="320"/>
+                        <ComboBox SelectedItem="{Binding QualitySettings.Bitrate}" Width="80">
+                            <sys:Int32>128</sys:Int32>
+                            <sys:Int32>192</sys:Int32>
+                            <sys:Int32>256</sys:Int32>
+                            <sys:Int32>320</sys:Int32>
                         </ComboBox>
                         <TextBlock Text="kbps" VerticalAlignment="Center" Margin="5,0,0,0"/>
                     </StackPanel>
@@ -117,13 +124,13 @@
                             </Style>
                         </StackPanel.Style>
                         <TextBlock Text="Quality (V0-V5):" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                        <ComboBox SelectedValue="{Binding QualitySettings.VbrQuality}" SelectedValuePath="Content" Width="60">
-                            <ComboBoxItem Content="0"/>
-                            <ComboBoxItem Content="1"/>
-                            <ComboBoxItem Content="2"/>
-                            <ComboBoxItem Content="3"/>
-                            <ComboBoxItem Content="4"/>
-                            <ComboBoxItem Content="5"/>
+                        <ComboBox SelectedItem="{Binding QualitySettings.VbrQuality}" Width="60">
+                            <sys:Int32>0</sys:Int32>
+                            <sys:Int32>1</sys:Int32>
+                            <sys:Int32>2</sys:Int32>
+                            <sys:Int32>3</sys:Int32>
+                            <sys:Int32>4</sys:Int32>
+                            <sys:Int32>5</sys:Int32>
                         </ComboBox>
                         <TextBlock Text="(0 is best)" VerticalAlignment="Center" Margin="5,0,0,0"/>
                     </StackPanel>
