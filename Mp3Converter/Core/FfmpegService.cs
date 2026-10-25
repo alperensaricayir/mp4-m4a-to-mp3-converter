@@ -12,32 +12,68 @@ namespace Mp3Converter.Core
 {
     public class FfmpegService
     {
-        private readonly string _ffmpegPath;
-        private readonly string _ffprobePath;
-        private readonly string _toolsDir;
+        private string _ffmpegPath = "";
+        private string _ffprobePath = "";
+        private readonly string _cacheToolsDir;
 
         public FfmpegService()
         {
-            string appDir = AppDomain.CurrentDomain.BaseDirectory;
-            _toolsDir = Path.Combine(appDir, "tools");
-            _ffmpegPath = Path.Combine(_toolsDir, "ffmpeg.exe");
-            _ffprobePath = Path.Combine(_toolsDir, "ffprobe.exe");
+            // Persist downloads under LocalAppData so bin/ rebuilds don't force a re-download.
+            _cacheToolsDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Mp3Converter",
+                "tools");
+
+            ResolvePaths();
+        }
+
+        private void ResolvePaths()
+        {
+            string appToolsDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tools");
+            string appFfmpeg = Path.Combine(appToolsDir, "ffmpeg.exe");
+            string appFfprobe = Path.Combine(appToolsDir, "ffprobe.exe");
+            string cacheFfmpeg = Path.Combine(_cacheToolsDir, "ffmpeg.exe");
+            string cacheFfprobe = Path.Combine(_cacheToolsDir, "ffprobe.exe");
+
+            // Prefer tools shipped next to the app (publish), then cached download.
+            if (File.Exists(appFfmpeg) && File.Exists(appFfprobe))
+            {
+                _ffmpegPath = appFfmpeg;
+                _ffprobePath = appFfprobe;
+            }
+            else
+            {
+                _ffmpegPath = cacheFfmpeg;
+                _ffprobePath = cacheFfprobe;
+            }
         }
 
         public bool CheckFfmpegExists()
         {
+            ResolvePaths();
             return File.Exists(_ffmpegPath) && File.Exists(_ffprobePath);
         }
 
         public async Task DownloadFfmpegAsync(IProgress<double> progress, CancellationToken ct)
         {
-            Directory.CreateDirectory(_toolsDir);
-            
+            Directory.CreateDirectory(_cacheToolsDir);
+
+            string ffmpegDest = Path.Combine(_cacheToolsDir, "ffmpeg.exe");
+            string ffprobeDest = Path.Combine(_cacheToolsDir, "ffprobe.exe");
+
+            if (File.Exists(ffmpegDest) && File.Exists(ffprobeDest))
+            {
+                _ffmpegPath = ffmpegDest;
+                _ffprobePath = ffprobeDest;
+                progress?.Report(100);
+                return;
+            }
+
             // Using a reliable release from GitHub (BtbN) - smaller and reliable
             // Note: This URL might change over time, ideally we should query the GitHub API for latest release asset.
             // But for simplicity and stability, let's use a known recent version or the "latest" redirect.
             string url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
-            string zipPath = Path.Combine(_toolsDir, "ffmpeg.zip");
+            string zipPath = Path.Combine(_cacheToolsDir, "ffmpeg.zip");
 
             using (var client = new HttpClient())
             {
@@ -75,7 +111,7 @@ namespace Mp3Converter.Core
             progress?.Report(101); // Indicating extraction
             
             // Unzip to temp folder
-            string extractPath = Path.Combine(_toolsDir, "temp_extract");
+            string extractPath = Path.Combine(_cacheToolsDir, "temp_extract");
             if (Directory.Exists(extractPath)) Directory.Delete(extractPath, true);
             Directory.CreateDirectory(extractPath);
 
@@ -83,10 +119,13 @@ namespace Mp3Converter.Core
 
             // Find ffmpeg.exe and ffprobe.exe in the extracted folders
             var binFiles = Directory.GetFiles(extractPath, "ffmpeg.exe", SearchOption.AllDirectories);
-            if (binFiles.Length > 0) File.Copy(binFiles[0], _ffmpegPath, true);
+            if (binFiles.Length > 0) File.Copy(binFiles[0], ffmpegDest, true);
 
             var probeFiles = Directory.GetFiles(extractPath, "ffprobe.exe", SearchOption.AllDirectories);
-            if (probeFiles.Length > 0) File.Copy(probeFiles[0], _ffprobePath, true);
+            if (probeFiles.Length > 0) File.Copy(probeFiles[0], ffprobeDest, true);
+
+            _ffmpegPath = ffmpegDest;
+            _ffprobePath = ffprobeDest;
 
             // Cleanup
             try
