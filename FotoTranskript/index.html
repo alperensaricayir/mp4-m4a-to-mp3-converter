@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Foto Transkript — Fotoğraftan Metin Çıkarıcı</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #1a2130;
+    --panel2: #222b3d;
+    --accent: #4f8cff;
+    --accent2: #7c5cff;
+    --text: #e8ecf4;
+    --muted: #94a0b8;
+    --ok: #3ecf8e;
+    --err: #ff6b6b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px 16px 60px;
+  }
+  .container { max-width: 900px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 28px; }
+  header h1 {
+    font-size: 1.9rem;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin-bottom: 6px;
+  }
+  header p { color: var(--muted); font-size: 0.95rem; }
+
+  .toolbar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .toolbar label { color: var(--muted); font-size: 0.9rem; }
+  select {
+    background: var(--panel2);
+    color: var(--text);
+    border: 1px solid #334059;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+
+  #dropzone {
+    border: 2px dashed #3a4a68;
+    border-radius: var(--radius);
+    background: var(--panel);
+    padding: 44px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  #dropzone.dragover { border-color: var(--accent); background: #1e2a42; }
+  #dropzone .icon { font-size: 2.6rem; margin-bottom: 10px; }
+  #dropzone .main { font-size: 1.05rem; margin-bottom: 6px; }
+  #dropzone .sub { color: var(--muted); font-size: 0.85rem; }
+  #fileInput { display: none; }
+
+  .global-actions {
+    display: none;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin: 18px 0;
+  }
+  .global-actions.visible { display: flex; }
+
+  button {
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    color: #fff;
+    border: none;
+    border-radius: 9px;
+    padding: 10px 20px;
+    font-size: 0.92rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity .15s, transform .1s;
+  }
+  button:hover { opacity: .9; }
+  button:active { transform: scale(.98); }
+  button.secondary {
+    background: var(--panel2);
+    border: 1px solid #334059;
+  }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+
+  .card {
+    background: var(--panel);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    gap: 16px;
+    border: 1px solid #263144;
+  }
+  @media (max-width: 620px) { .card { grid-template-columns: 1fr; } }
+  .card img {
+    width: 100%;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 9px;
+    background: #000;
+  }
+  .card .meta { font-size: 0.8rem; color: var(--muted); margin-top: 6px; word-break: break-all; }
+
+  .status { font-size: 0.85rem; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .status .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+  .status.working .dot { background: var(--accent); animation: pulse 1s infinite; }
+  .status.done .dot { background: var(--ok); }
+  .status.error .dot { background: var(--err); }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  .progress {
+    height: 6px;
+    background: #2a3550;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+  .progress > div {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width .2s;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 110px;
+    background: var(--panel2);
+    color: var(--text);
+    border: 1px solid #334059;
+    border-radius: 9px;
+    padding: 10px 12px;
+    font-family: Consolas, monospace;
+    font-size: 0.88rem;
+    resize: vertical;
+    line-height: 1.5;
+  }
+  textarea:focus { outline: 1px solid var(--accent); }
+
+  .card-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .card-actions button { padding: 7px 14px; font-size: 0.82rem; }
+
+  .toast {
+    position: fixed;
+    bottom: 22px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--ok);
+    color: #06281a;
+    font-weight: 600;
+    padding: 11px 22px;
+    border-radius: 10px;
+    transition: transform .25s;
+    z-index: 10;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>📷 Foto Transkript</h1>
+    <p>Fotoğraf yükleyin, içindeki yazıları otomatik metne dönüştürelim. Her şey tarayıcınızda çalışır — fotoğraflarınız hiçbir sunucuya gönderilmez.</p>
+  </header>
+
+  <div class="toolbar">
+    <label for="lang">Tanıma dili:</label>
+    <select id="lang">
+      <option value="tur+eng" selected>Türkçe + İngilizce</option>
+      <option value="tur">Türkçe</option>
+      <option value="eng">İngilizce</option>
+      <option value="deu">Almanca</option>
+      <option value="fra">Fransızca</option>
+      <option value="ara">Arapça</option>
+      <option value="rus">Rusça</option>
+    </select>
+  </div>
+
+  <div id="dropzone">
+    <div class="icon">🖼️</div>
+    <div class="main">Fotoğrafları buraya sürükleyin veya tıklayıp seçin</div>
+    <div class="sub">JPG, PNG, WEBP, BMP desteklenir • Birden fazla fotoğraf seçebilirsiniz • Pano'dan yapıştırma (Ctrl+V) da çalışır</div>
+  </div>
+  <input type="file" id="fileInput" accept="image/*" multiple>
+
+  <div class="global-actions" id="globalActions">
+    <button id="copyAllBtn">📋 Tüm Metni Kopyala</button>
+    <button id="downloadAllBtn">⬇️ Tümünü .txt İndir</button>
+    <button class="secondary" id="clearBtn">🗑️ Temizle</button>
+  </div>
+
+  <div id="results"></div>
+</div>
+
+<div class="toast" id="toast">Kopyalandı!</div>
+
+<script>
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const results = document.getElementById('results');
+  const globalActions = document.getElementById('globalActions');
+  const langSelect = document.getElementById('lang');
+  const toast = document.getElementById('toast');
+
+  let cardCounter = 0;
+
+  // --- Dosya alma yolları ---
+  dropzone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', e => { handleFiles(e.target.files); fileInput.value = ''; });
+
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    handleFiles(e.dataTransfer.files);
+  });
+
+  // Panodan yapıştırma (ör. ekran görüntüsü)
+  document.addEventListener('paste', e => {
+    const items = [...(e.clipboardData?.items || [])]
+      .filter(i => i.type.startsWith('image/'))
+      .map(i => i.getAsFile())
+      .filter(Boolean);
+    if (items.length) handleFiles(items);
+  });
+
+  function handleFiles(fileList) {
+    const images = [...fileList].filter(f => f.type.startsWith('image/'));
+    if (!images.length) return;
+    globalActions.classList.add('visible');
+    images.forEach(f => processImage(f));
+  }
+
+  // --- Kart oluşturma ---
+  function createCard(file) {
+    const id = ++cardCounter;
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div>
+        <img alt="önizleme">
+        <div class="meta">${escapeHtml(file.name)}<br>${(file.size / 1024).toFixed(0)} KB</div>
+      </div>
+      <div>
+        <div class="status working"><span class="dot"></span><span class="label">Hazırlanıyor…</span></div>
+        <div class="progress"><div></div></div>
+        <textarea placeholder="Metin burada görünecek…" spellcheck="false"></textarea>
+        <div class="card-actions">
+          <button class="copy-btn" disabled>📋 Kopyala</button>
+          <button class="dl-btn secondary" disabled>⬇️ .txt İndir</button>
+          <button class="remove-btn secondary">✖ Kaldır</button>
+        </div>
+      </div>`;
+    results.prepend(card);
+
+    const img = card.querySelector('img');
+    img.src = URL.createObjectURL(file);
+
+    card.querySelector('.remove-btn').addEventListener('click', () => {
+      URL.revokeObjectURL(img.src);
+      card.remove();
+      if (!results.children.length) globalActions.classList.remove('visible');
+    });
+
+    const textarea = card.querySelector('textarea');
+    const copyBtn = card.querySelector('.copy-btn');
+    const dlBtn = card.querySelector('.dl-btn');
+
+    copyBtn.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(textarea.value);
+      showToast('Kopyalandı!');
+    });
+    dlBtn.addEventListener('click', () => {
+      downloadText(textarea.value, file.name.replace(/\.[^.]+$/, '') + '.txt');
+    });
+
+    return {
+      card,
+      fileName: file.name,
+      setProgress(p) { card.querySelector('.progress > div').style.width = (p * 100).toFixed(0) + '%'; },
+      setStatus(cls, label) {
+        const s = card.querySelector('.status');
+        s.className = 'status ' + cls;
+        s.querySelector('.label').textContent = label;
+      },
+      setText(t) {
+        textarea.value = t;
+        copyBtn.disabled = dlBtn.disabled = false;
+      }
+    };
+  }
+
+  // --- OCR ---
+  async function processImage(file) {
+    const ui = createCard(file);
+    const lang = langSelect.value;
+    try {
+      ui.setStatus('working', 'Model yükleniyor…');
+      const worker = await Tesseract.createWorker(lang, 1, {
+        logger: m => {
+          if (m.status === 'recognizing text') {
+            ui.setStatus('working', 'Metin tanınıyor… %' + (m.progress * 100).toFixed(0));
+            ui.setProgress(m.progress);
+          } else if (m.status === 'loading language traineddata' || m.status === 'loading tesseract core') {
+            ui.setStatus('working', 'Dil modeli indiriliyor…');
+          }
+        }
+      });
+      const { data } = await worker.recognize(file);
+      await worker.terminate();
+
+      const text = (data.text || '').trim();
+      ui.setProgress(1);
+      if (text) {
+        ui.setText(text);
+        ui.setStatus('done', 'Tamamlandı — güven: %' + data.confidence.toFixed(0));
+      } else {
+        ui.setText('');
+        ui.setStatus('done', 'Tamamlandı — fotoğrafta okunabilir metin bulunamadı.');
+      }
+    } catch (err) {
+      console.error(err);
+      ui.setStatus('error', 'Hata: ' + (err.message || 'Tanıma başarısız oldu.'));
+    }
+  }
+
+  // --- Toplu işlemler ---
+  document.getElementById('copyAllBtn').addEventListener('click', async () => {
+    const all = collectAllText();
+    if (!all) return;
+    await navigator.clipboard.writeText(all);
+    showToast('Tüm metin kopyalandı!');
+  });
+
+  document.getElementById('downloadAllBtn').addEventListener('click', () => {
+    const all = collectAllText();
+    if (!all) return;
+    downloadText(all, 'foto-transkript.txt');
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    results.querySelectorAll('img').forEach(i => URL.revokeObjectURL(i.src));
+    results.innerHTML = '';
+    globalActions.classList.remove('visible');
+  });
+
+  function collectAllText() {
+    const parts = [];
+    // Kartlar prepend edildiği için ters sırada topla (yüklenme sırası)
+    [...results.querySelectorAll('.card')].reverse().forEach(card => {
+      const name = card.querySelector('.meta').innerText.split('\n')[0];
+      const text = card.querySelector('textarea').value.trim();
+      if (text) parts.push('===== ' + name + ' =====\n' + text);
+    });
+    return parts.join('\n\n');
+  }
+
+  function downloadText(text, filename) {
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1800);
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+</script>
+</body>
+</html>
