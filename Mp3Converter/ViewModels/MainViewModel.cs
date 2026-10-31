@@ -32,6 +32,23 @@ namespace Mp3Converter.ViewModels
         private Mp3QualitySettings _qualitySettings = new();
 
         [ObservableProperty]
+        [NotifyPropertyChangedFor(nameof(IsMp3Output))]
+        [NotifyPropertyChangedFor(nameof(IsMp4Output))]
+        private OutputFormat _outputFormat = OutputFormat.Mp3;
+
+        public bool IsMp3Output
+        {
+            get => OutputFormat == OutputFormat.Mp3;
+            set { if (value) OutputFormat = OutputFormat.Mp3; }
+        }
+
+        public bool IsMp4Output
+        {
+            get => OutputFormat == OutputFormat.Mp4;
+            set { if (value) OutputFormat = OutputFormat.Mp4; }
+        }
+
+        [ObservableProperty]
         [NotifyPropertyChangedFor(nameof(IsNotConverting))]
         private bool _isConverting;
 
@@ -49,9 +66,14 @@ namespace Mp3Converter.ViewModels
         [ObservableProperty]
         private double _downloadProgress;
 
+        /// <summary>"Video + Ses Birleştir" tab; shares the same FFmpeg integration.</summary>
+        public MergeViewModel Merge { get; }
+
         public MainViewModel()
         {
             _ffmpegService = new FfmpegService();
+            Merge = new MergeViewModel(_ffmpegService);
+
             string docPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             OutputFolder = Path.Combine(docPath, "Mp3ConverterOutput");
 
@@ -66,7 +88,7 @@ namespace Mp3Converter.ViewModels
         {
             if (_ffmpegService.CheckFfmpegExists())
             {
-                Log("Ready. FFmpeg found.");
+                Log($"Ready. FFmpeg found: {_ffmpegService.FfmpegPath}");
                 return;
             }
 
@@ -79,7 +101,7 @@ namespace Mp3Converter.ViewModels
 
             if (result != MessageBoxResult.Yes)
             {
-                Log("ERROR: ffmpeg.exe not found. Please place it in the 'tools' folder manually.");
+                Log("ERROR: FFmpeg bulunamadı. ffmpeg.exe/ffprobe.exe dosyalarını PATH'e veya 'tools' klasörüne ekleyin.");
                 return;
             }
 
@@ -125,7 +147,7 @@ namespace Mp3Converter.ViewModels
             var dialog = new OpenFileDialog
             {
                 Multiselect = true,
-                Filter = "Audio Files|*.mp4;*.m4a;*.mp3|MP4 Files|*.mp4|M4A Files|*.m4a|MP3 Files|*.mp3|All Files|*.*"
+                Filter = "Media Files|*.mp4;*.m4a;*.mp3;*.webm|WebM Files|*.webm|MP4 Files|*.mp4|M4A Files|*.m4a|MP3 Files|*.mp3|All Files|*.*"
             };
 
             if (dialog.ShowDialog() == true)
@@ -156,9 +178,10 @@ namespace Mp3Converter.ViewModels
             try
             {
                 var files = Directory.GetFiles(path, "*.*", SearchOption.AllDirectories)
-                    .Where(f => f.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) || 
+                    .Where(f => f.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase) ||
                                 f.EndsWith(".m4a", StringComparison.OrdinalIgnoreCase) ||
-                                f.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase));
+                                f.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase) ||
+                                f.EndsWith(".webm", StringComparison.OrdinalIgnoreCase));
 
                 int count = 0;
                 foreach (var file in files)
@@ -265,14 +288,14 @@ namespace Mp3Converter.ViewModels
                         break;
                     }
 
-                    // Check Skip Logic
+                    string extension = FfmpegService.GetExtension(OutputFormat);
+
                     if (SkipExisting)
                     {
-                        // Ensure directory exists for check
                         Directory.CreateDirectory(OutputFolder);
                         string baseName = Path.GetFileNameWithoutExtension(item.InputPath);
-                        string potentialOutput = Path.Combine(OutputFolder, baseName + ".mp3");
-                        
+                        string potentialOutput = Path.Combine(OutputFolder, baseName + extension);
+
                         if (File.Exists(potentialOutput) && new FileInfo(potentialOutput).Length > 0)
                         {
                             item.Status = ConversionStatus.Skipped;
@@ -286,11 +309,11 @@ namespace Mp3Converter.ViewModels
                     item.Status = ConversionStatus.InProgress;
                     item.Progress = 0;
                     item.ErrorMessage = null;
-                    Log($"Converting: {item.FileName}...");
+                    Log($"Converting: {item.FileName} → {OutputFormat.ToString().ToUpperInvariant()}...");
 
                     try
                     {
-                        await _ffmpegService.ConvertAsync(item, OutputFolder, QualitySettings, _cts.Token);
+                        await _ffmpegService.ConvertAsync(item, OutputFolder, QualitySettings, OutputFormat, _cts.Token);
                         Log($"Completed: {item.FileName}");
                     }
                     catch (TaskCanceledException)

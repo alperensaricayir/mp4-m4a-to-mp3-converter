@@ -5,9 +5,10 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:Mp3Converter.ViewModels"
         xmlns:core="clr-namespace:Mp3Converter.Core"
+        xmlns:views="clr-namespace:Mp3Converter.Views"
         xmlns:sys="clr-namespace:System;assembly=System.Runtime"
         mc:Ignorable="d"
-        Title="MP4/M4A to MP3 Converter" Height="600" Width="900"
+        Title="Media Converter — Dönüştür / Video + Ses Birleştir" Height="680" Width="940" MinHeight="560" MinWidth="820"
         WindowStartupLocation="CenterScreen"
         WindowState="Normal"
         ShowInTaskbar="True"
@@ -18,16 +19,9 @@
     </Window.Resources>
 
     <Grid Margin="10">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/> <!-- Toolbar -->
-            <RowDefinition Height="*"/>    <!-- List -->
-            <RowDefinition Height="Auto"/> <!-- Settings -->
-            <RowDefinition Height="Auto"/> <!-- Actions -->
-            <RowDefinition Height="100"/>  <!-- Log -->
-        </Grid.RowDefinitions>
 
-        <!-- Download Overlay -->
-        <Grid Grid.RowSpan="5" Background="#AAFFFFFF" Panel.ZIndex="1000" Visibility="{Binding IsDownloadingFfmpeg, Converter={StaticResource BoolToVis}}">
+        <!-- Download Overlay (covers both tabs) -->
+        <Grid Background="#AAFFFFFF" Panel.ZIndex="1000" Visibility="{Binding IsDownloadingFfmpeg, Converter={StaticResource BoolToVis}}">
             <Border Background="White" BorderBrush="Gray" BorderThickness="1" HorizontalAlignment="Center" VerticalAlignment="Center" Padding="20" CornerRadius="5">
                 <Border.Effect>
                     <DropShadowEffect BlurRadius="12" ShadowDepth="3" Opacity="0.35"/>
@@ -40,6 +34,17 @@
                 </StackPanel>
             </Border>
         </Grid>
+
+        <TabControl>
+        <TabItem Header="  Dönüştür (MP3 / MP4)  ">
+        <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/> <!-- Toolbar -->
+            <RowDefinition Height="*"/>    <!-- List -->
+            <RowDefinition Height="Auto"/> <!-- Settings -->
+            <RowDefinition Height="Auto"/> <!-- Actions -->
+            <RowDefinition Height="100"/>  <!-- Log -->
+        </Grid.RowDefinitions>
 
         <!-- Toolbar -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
@@ -83,26 +88,22 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
                 
-                <!-- Quality Settings -->
+                <!-- Output Format + Quality -->
                 <StackPanel Grid.Column="0" Orientation="Vertical">
-                    <TextBlock Text="Quality Settings" FontWeight="Bold" Margin="0,0,0,5"/>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
-                        <RadioButton Content="CBR (Constant)" IsChecked="{Binding QualitySettings.IsCbr}" GroupName="Mode" Margin="0,0,10,0"/>
-                        <RadioButton Content="VBR (Variable)" GroupName="Mode"/> 
-                        <!-- Simple logic: if IsCbr is false, VBR is true. But RadioButton binding handles it if GroupName matches. 
-                             Wait, Binding IsChecked to property sets it. We need inverse for VBR? 
-                             No, just bind IsCbr to first one. Second one doesn't need binding if GroupName handles it? 
-                             Actually, better to bind second one to a different property or use a converter.
-                             Or just bind IsCbr to the first one, and let the second one be driven by GroupName UI behavior? 
-                             MVVM best practice: Bind IsCbr to one, and rely on UI. But if VM changes, we want update.
-                             Let's bind IsCbr to the first one. The second one will uncheck the first one. 
-                             But the second one needs to update if IsCbr becomes false. 
-                             Let's just bind IsCbr to the first one.
-                        -->
+                    <TextBlock Text="Output Format" FontWeight="Bold" Margin="0,0,0,5"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <RadioButton Content="MP3 (audio)" IsChecked="{Binding IsMp3Output}" GroupName="OutputFormat" Margin="0,0,15,0"/>
+                        <RadioButton Content="MP4 (video)" IsChecked="{Binding IsMp4Output}" GroupName="OutputFormat"/>
                     </StackPanel>
-                    
-                    <StackPanel Orientation="Horizontal" IsEnabled="{Binding QualitySettings.IsCbr}">
-                        <TextBlock Text="Bitrate:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+
+                    <TextBlock Text="Quality Settings" FontWeight="Bold" Margin="0,0,0,5"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,5" IsEnabled="{Binding IsMp3Output}">
+                        <RadioButton Content="CBR (Constant)" IsChecked="{Binding QualitySettings.IsCbr}" GroupName="Mode" Margin="0,0,10,0"/>
+                        <RadioButton Content="VBR (Variable)" GroupName="Mode"/>
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Audio bitrate:" VerticalAlignment="Center" Margin="0,0,5,0"/>
                         <ComboBox SelectedItem="{Binding QualitySettings.Bitrate}" Width="80">
                             <sys:Int32>128</sys:Int32>
                             <sys:Int32>192</sys:Int32>
@@ -111,15 +112,19 @@
                         </ComboBox>
                         <TextBlock Text="kbps" VerticalAlignment="Center" Margin="5,0,0,0"/>
                     </StackPanel>
-                    
+
                     <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
-                         <StackPanel.Style>
+                        <StackPanel.Style>
                             <Style TargetType="StackPanel">
                                 <Setter Property="Visibility" Value="Collapsed"/>
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding QualitySettings.IsCbr}" Value="False">
+                                    <MultiDataTrigger>
+                                        <MultiDataTrigger.Conditions>
+                                            <Condition Binding="{Binding IsMp3Output}" Value="True"/>
+                                            <Condition Binding="{Binding QualitySettings.IsCbr}" Value="False"/>
+                                        </MultiDataTrigger.Conditions>
                                         <Setter Property="Visibility" Value="Visible"/>
-                                    </DataTrigger>
+                                    </MultiDataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </StackPanel.Style>
@@ -165,6 +170,14 @@
         <GroupBox Grid.Row="4" Header="Logs">
             <TextBox Text="{Binding LogText}" IsReadOnly="True" VerticalScrollBarVisibility="Auto" TextWrapping="Wrap" FontFamily="Consolas"/>
         </GroupBox>
+
+        </Grid>
+        </TabItem>
+
+        <TabItem Header="  Video + Ses Birleştir  ">
+            <views:MergeView DataContext="{Binding Merge}" Margin="8"/>
+        </TabItem>
+        </TabControl>
 
     </Grid>
 </Window>
