@@ -332,6 +332,19 @@ namespace Mp3Converter.Core
             return path;
         }
 
+        /// <summary>"base.ext", then "base_2.ext", "base_3.ext", ... never overwriting.</summary>
+        public static string GetUniqueSuffixedPath(string folder, string baseName, string extension)
+        {
+            string candidate = Path.Combine(folder, baseName + extension);
+            int n = 2;
+            while (File.Exists(candidate))
+            {
+                candidate = Path.Combine(folder, $"{baseName}_{n}{extension}");
+                n++;
+            }
+            return candidate;
+        }
+
         public static string LastMeaningfulLine(IReadOnlyList<string> lines)
         {
             for (int i = lines.Count - 1; i >= 0; i--)

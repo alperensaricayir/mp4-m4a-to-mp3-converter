@@ -69,10 +69,14 @@ namespace Mp3Converter.ViewModels
         /// <summary>"Video + Ses Birleştir" tab; shares the same FFmpeg integration.</summary>
         public MergeViewModel Merge { get; }
 
+        /// <summary>"Video Küçült" tab; shares the same FFmpeg integration.</summary>
+        public CompressViewModel Compress { get; }
+
         public MainViewModel()
         {
             _ffmpegService = new FfmpegService();
             Merge = new MergeViewModel(_ffmpegService);
+            Compress = new CompressViewModel(_ffmpegService);
 
             string docPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             OutputFolder = Path.Combine(docPath, "Mp3ConverterOutput");

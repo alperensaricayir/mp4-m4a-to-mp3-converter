@@ -79,18 +79,24 @@ namespace Mp3Converter.Core
                         Channels = GetInt(s, "channels"),
                         Width = GetInt(s, "width"),
                         Height = GetInt(s, "height"),
+                        BitRate = GetLong(s, "bit_rate"),
                     });
                 }
             }
 
             TimeSpan? duration = null, start = null;
+            long? bitRate = null;
             string formatName = "";
             if (root.TryGetProperty("format", out var fmt))
             {
                 duration = GetSeconds(fmt, "duration");
                 start = GetSeconds(fmt, "start_time");
                 formatName = GetString(fmt, "format_name") ?? "";
+                bitRate = GetLong(fmt, "bit_rate");
             }
+
+            long fileSize = 0;
+            try { fileSize = new FileInfo(filePath).Length; } catch { }
 
             return new MediaInfo
             {
@@ -98,8 +104,18 @@ namespace Mp3Converter.Core
                 FormatName = formatName,
                 Duration = duration,
                 StartTime = start,
+                BitRate = bitRate,
+                FileSize = fileSize,
                 Streams = streams
             };
+        }
+
+        private static long? GetLong(JsonElement el, string name)
+        {
+            if (!el.TryGetProperty(name, out var v)) return null;
+            if (v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out long i)) return i;
+            if (v.ValueKind == JsonValueKind.String && long.TryParse(v.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out long j)) return j;
+            return null;
         }
 
         private static string? GetString(JsonElement el, string name) =>

@@ -8,7 +8,7 @@
         xmlns:views="clr-namespace:Mp3Converter.Views"
         xmlns:sys="clr-namespace:System;assembly=System.Runtime"
         mc:Ignorable="d"
-        Title="Media Converter — Dönüştür / Video + Ses Birleştir" Height="680" Width="940" MinHeight="560" MinWidth="820"
+        Title="Media Converter — Dönüştür / Birleştir / Küçült" Height="700" Width="960" MinHeight="580" MinWidth="840"
         WindowStartupLocation="CenterScreen"
         WindowState="Normal"
         ShowInTaskbar="True"
@@ -176,6 +176,10 @@
 
         <TabItem Header="  Video + Ses Birleştir  ">
             <views:MergeView DataContext="{Binding Merge}" Margin="8"/>
+        </TabItem>
+
+        <TabItem Header="  Video Küçült  ">
+            <views:CompressView DataContext="{Binding Compress}" Margin="8"/>
         </TabItem>
         </TabControl>
 

@@ -99,19 +99,8 @@ namespace Mp3Converter.Core
             container == MergeContainer.Mp4 ? ".mp4" : ".mkv";
 
         /// <summary>"Video_BIRLESMIS.mkv", then "_2", "_3", ... never overwriting.</summary>
-        public static string BuildOutputPath(string videoPath, string outputFolder, MergeContainer container)
-        {
-            string baseName = Path.GetFileNameWithoutExtension(videoPath) + "_BIRLESMIS";
-            string ext = GetExtension(container);
-            string candidate = Path.Combine(outputFolder, baseName + ext);
-            int n = 2;
-            while (File.Exists(candidate))
-            {
-                candidate = Path.Combine(outputFolder, $"{baseName}_{n}{ext}");
-                n++;
-            }
-            return candidate;
-        }
+        public static string BuildOutputPath(string videoPath, string outputFolder, MergeContainer container) =>
+            FfmpegService.GetUniqueSuffixedPath(outputFolder, Path.GetFileNameWithoutExtension(videoPath) + "_BIRLESMIS", GetExtension(container));
 
         public async Task<MergeResult> MergeAsync(
             MergeOptions options,
