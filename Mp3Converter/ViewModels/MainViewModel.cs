@@ -72,11 +72,15 @@ namespace Mp3Converter.ViewModels
         /// <summary>"Video Küçült" tab; shares the same FFmpeg integration.</summary>
         public CompressViewModel Compress { get; }
 
+        /// <summary>"Video Kırp" tab; shares the same FFmpeg integration.</summary>
+        public TrimViewModel Trim { get; }
+
         public MainViewModel()
         {
             _ffmpegService = new FfmpegService();
             Merge = new MergeViewModel(_ffmpegService);
             Compress = new CompressViewModel(_ffmpegService);
+            Trim = new TrimViewModel(_ffmpegService);
 
             string docPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             OutputFolder = Path.Combine(docPath, "Mp3ConverterOutput");
@@ -141,8 +145,9 @@ namespace Mp3Converter.ViewModels
 
         private void Log(string message)
         {
+            DiagnosticsLog.Write("[Convert] " + message);
             var msg = $"[{DateTime.Now:HH:mm:ss}] {message}";
-            Application.Current?.Dispatcher.InvokeAsync(() => LogText += msg + Environment.NewLine);
+            Application.Current?.Dispatcher.InvokeAsync(() => LogText = UiLog.Append(LogText, msg));
         }
 
         [RelayCommand]

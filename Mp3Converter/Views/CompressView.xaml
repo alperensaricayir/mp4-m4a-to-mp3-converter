@@ -98,7 +98,8 @@
                 <!-- Encoding -->
                 <StackPanel Grid.Column="2" Margin="10,0,0,0">
                     <TextBlock Text="Encode" FontWeight="Bold" Margin="0,0,0,5"/>
-                    <CheckBox Content="İki geçişli (boyut daha isabetli, ~2× süre)" IsChecked="{Binding TwoPass}"/>
+                    <CheckBox Content="İki geçişli (küçük dosyalar; ~2× süre)" IsChecked="{Binding TwoPass}"
+                              ToolTip="Büyük videolarda (1.5 GB / 1.5 saat üstü) otomatik kapanır. Aksi halde temp dosya ve log yüzünden uygulama sonda çökebilir."/>
                     <TextBlock Text="Çıktı: H.264 + AAC, MP4" FontSize="11" Foreground="Gray" Margin="0,6,0,0"/>
                     <TextBlock Text="Ad: VideoAdi_KUCULTULMUS.mp4" FontSize="11" Foreground="Gray"/>
                 </StackPanel>

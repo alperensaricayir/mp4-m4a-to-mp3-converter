@@ -27,6 +27,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/> <!-- inputs -->
             <RowDefinition Height="Auto"/> <!-- options -->
+            <RowDefinition Height="Auto"/> <!-- estimate -->
             <RowDefinition Height="Auto"/> <!-- actions + progress -->
             <RowDefinition Height="*"/>    <!-- log -->
         </Grid.RowDefinitions>
@@ -66,13 +67,17 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Container -->
+                <!-- Container + quality -->
                 <StackPanel Grid.Column="0">
-                    <TextBlock Text="Çıktı Formatı" FontWeight="Bold" Margin="0,0,0,5"/>
-                    <RadioButton Content="MKV (varsayılan, yeniden encode yok)" IsChecked="{Binding IsMkv}" GroupName="MergeContainer" Margin="0,0,0,3"/>
-                    <RadioButton Content="MP4 (gerekirse uyumsuz akış encode edilir)" IsChecked="{Binding IsMp4}" GroupName="MergeContainer"/>
-                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0" Visibility="{Binding IsMp4, Converter={StaticResource BoolToVis}}">
-                        <TextBlock Text="AAC bitrate:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                    <TextBlock Text="Çıktı Formatı ve Kalite" FontWeight="Bold" Margin="0,0,0,5"/>
+                    <RadioButton Content="MKV (kopya mümkünse encode yok)" IsChecked="{Binding IsMkv}" GroupName="MergeContainer" Margin="0,0,0,3"/>
+                    <RadioButton Content="MP4 (gerekirse encode)" IsChecked="{Binding IsMp4}" GroupName="MergeContainer"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <TextBlock Text="Kalite:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <ComboBox ItemsSource="{Binding Qualities}" SelectedItem="{Binding SelectedQuality}" DisplayMemberPath="Label" Width="230"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <TextBlock Text="Ses bitrate:" VerticalAlignment="Center" Margin="0,0,5,0"/>
                         <ComboBox SelectedItem="{Binding AudioBitrateKbps}" Width="70"
                                   xmlns:sys="clr-namespace:System;assembly=System.Runtime">
                             <sys:Int32>128</sys:Int32>
@@ -106,8 +111,27 @@
             </Grid>
         </Border>
 
+        <!-- Estimate -->
+        <Border Grid.Row="2" BorderBrush="#A5D6A7" BorderThickness="1" Padding="10" Margin="0,8,0,0" Background="#E8F5E9">
+            <StackPanel>
+                <TextBlock Text="{Binding EstimateText}" FontSize="16" FontWeight="Bold" Foreground="#1B5E20"/>
+                <TextBlock Text="{Binding EstimateDetailText}" Foreground="#2E7D32" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding EstimateWarning}" Foreground="#C62828" Margin="0,4,0,0" TextWrapping="Wrap" FontWeight="SemiBold">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding EstimateWarning}" Value="{x:Null}">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </StackPanel>
+        </Border>
+
         <!-- Actions + progress -->
-        <Grid Grid.Row="2" Margin="0,8,0,0">
+        <Grid Grid.Row="3" Margin="0,8,0,0">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -152,7 +176,7 @@
         </Grid>
 
         <!-- Log -->
-        <GroupBox Grid.Row="3" Header="Detaylar / Log" Margin="0,8,0,0"
+        <GroupBox Grid.Row="4" Header="Detaylar / Log" Margin="0,8,0,0"
                   Visibility="{Binding IsLogVisible, Converter={StaticResource BoolToVis}}">
             <TextBox Text="{Binding LogText, Mode=OneWay}" IsReadOnly="True" VerticalScrollBarVisibility="Auto"
                      HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap" FontFamily="Consolas" FontSize="11"

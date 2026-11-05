@@ -17,6 +17,10 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        Mp3Converter.Core.DiagnosticsLog.Write($"=== App started (pid {Environment.ProcessId}, .NET {Environment.Version}) ===");
+        Exit += (_, args) => Mp3Converter.Core.DiagnosticsLog.Write($"=== App exiting (code {args.ApplicationExitCode}) ===");
+        SessionEnding += (_, args) => Mp3Converter.Core.DiagnosticsLog.Write($"=== Session ending: {args.ReasonSessionEnding} ===");
+
         // UI thread exceptions: show and keep running.
         DispatcherUnhandledException += (_, args) =>
         {
@@ -48,6 +52,7 @@ public partial class App : Application
 
     private static void WriteCrashLog(string source, Exception? ex)
     {
+        Mp3Converter.Core.DiagnosticsLog.Write($"{source}: {ex?.GetType().Name}: {ex?.Message}");
         try
         {
             File.AppendAllText(CrashLogPath,

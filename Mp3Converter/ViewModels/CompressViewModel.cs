@@ -143,8 +143,9 @@ namespace Mp3Converter.ViewModels
 
         private void Log(string message)
         {
+            DiagnosticsLog.Write("[Compress] " + message);
             var line = $"[{DateTime.Now:HH:mm:ss}] {message}";
-            Application.Current?.Dispatcher.InvokeAsync(() => LogText += line + Environment.NewLine);
+            Application.Current?.Dispatcher.InvokeAsync(() => LogText = UiLog.Append(LogText, line));
         }
 
         private CompressOptions BuildOptions()
@@ -242,6 +243,13 @@ namespace Mp3Converter.ViewModels
                     $"video ≈{info.EstimatedVideoBitRate / 1000} kbps  •  ses {(info.HasAudio ? $"{info.FirstAudio!.CodecName} ≈{info.EstimatedAudioBitRate / 1000} kbps" : "yok")}";
                 Log("ffprobe: " + SourceInfoText);
                 foreach (var s in info.Streams) Log("   " + s);
+
+                if (TwoPass && (info.FileSize >= 1_500_000_000L || info.EffectiveDuration.TotalHours >= 1.5))
+                {
+                    TwoPass = false;
+                    Log("Büyük dosya: iki geçişli encode kapatıldı (32 GB gibi dosyalarda sonda çökme riski).");
+                }
+
                 UpdateEstimate();
             }
             catch (OperationCanceledException) { }

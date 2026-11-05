@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
 using Mp3Converter.Core;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
@@ -23,9 +24,23 @@ namespace Mp3Converter.ViewModels
         private const string AudioFilter =
             "Ses / Medya Dosyaları|*.mp3;*.aac;*.m4a;*.wav;*.ogg;*.opus;*.flac;*.webm;*.mp4;*.mkv|Tüm Dosyalar|*.*";
 
+        public sealed record MergeQualityOption(MergeQuality Quality, string Label);
+
         private readonly FfmpegService _ffmpeg;
         private readonly MediaMergeService _merge;
         private CancellationTokenSource? _cts;
+        private CancellationTokenSource? _probeCts;
+        private MediaInfo? _videoInfo;
+        private MediaInfo? _audioInfo;
+
+        public IReadOnlyList<MergeQualityOption> Qualities { get; } = new[]
+        {
+            new MergeQualityOption(MergeQuality.Same, "Aynı kalite (video boyutu korunur)"),
+            new MergeQualityOption(MergeQuality.VeryHigh, "Çok kaliteli"),
+            new MergeQualityOption(MergeQuality.High, "Yüksek"),
+            new MergeQualityOption(MergeQuality.Medium, "Orta"),
+            new MergeQualityOption(MergeQuality.Low, "Düşük"),
+        };
 
         [ObservableProperty]
         [NotifyCanExecuteChangedFor(nameof(MergeCommand))]
@@ -83,6 +98,18 @@ namespace Mp3Converter.ViewModels
         private int _audioBitrateKbps = 192;
 
         [ObservableProperty]
+        private MergeQualityOption _selectedQuality;
+
+        [ObservableProperty]
+        private string _estimateText = "Önce bir video seçin.";
+
+        [ObservableProperty]
+        private string _estimateDetailText = "";
+
+        [ObservableProperty]
+        private string? _estimateWarning;
+
+        [ObservableProperty]
         [NotifyPropertyChangedFor(nameof(IsIdle))]
         [NotifyCanExecuteChangedFor(nameof(MergeCommand))]
         [NotifyCanExecuteChangedFor(nameof(CancelCommand))]
@@ -113,35 +140,97 @@ namespace Mp3Converter.ViewModels
         {
             _ffmpeg = ffmpeg;
             _merge = new MediaMergeService(ffmpeg, new MediaProbeService(ffmpeg));
+            _selectedQuality = Qualities[0];
+        }
+
+        partial void OnSelectedQualityChanged(MergeQualityOption value) => UpdateEstimate();
+        partial void OnContainerChanged(MergeContainer value) => UpdateEstimate();
+        partial void OnAudioBitrateKbpsChanged(int value) => UpdateEstimate();
+
+        private void UpdateEstimate()
+        {
+            if (_videoInfo == null)
+            {
+                EstimateText = string.IsNullOrWhiteSpace(VideoPath) ? "Önce bir video seçin." : "Video analiz ediliyor...";
+                EstimateDetailText = "";
+                EstimateWarning = null;
+                return;
+            }
+
+            var est = MediaMergeService.Estimate(_videoInfo, _audioInfo, SelectedQuality.Quality, Container, AudioBitrateKbps);
+            EstimateText = $"Birleşince tahmini boyut: ~{est.EstimatedMb:0.0} MB";
+            EstimateDetailText =
+                $"Kaynak video {est.SourceVideoMb:0.0} MB  →  ~{est.EstimatedMb:0.0} MB   " +
+                (est.CopyVideo
+                    ? "görüntü kopyalanır (aynı kalite)"
+                    : $"görüntü encode CRF {est.Crf}, ~{est.VideoBitrateKbps} kbps") +
+                $", ses {est.AudioBitrateKbps} kbps";
+            EstimateWarning = est.Warning;
         }
 
         private void Log(string message)
         {
+            DiagnosticsLog.Write("[Merge] " + message);
             var line = $"[{DateTime.Now:HH:mm:ss}] {message}";
-            Application.Current?.Dispatcher.InvokeAsync(() => LogText += line + Environment.NewLine);
+            Application.Current?.Dispatcher.InvokeAsync(() => LogText = UiLog.Append(LogText, line));
         }
 
         [RelayCommand]
-        private void SelectVideo()
+        private async Task SelectVideo()
         {
             var dialog = new OpenFileDialog { Title = "Video Dosyası Seç", Filter = VideoFilter };
-            if (dialog.ShowDialog() == true)
+            if (dialog.ShowDialog() != true) return;
+
+            VideoPath = dialog.FileName;
+            if (string.IsNullOrWhiteSpace(OutputFolder))
+                OutputFolder = Path.GetDirectoryName(dialog.FileName) ?? "";
+            Log($"Video seçildi: {VideoPath}");
+            await ProbeVideoAsync();
+        }
+
+        [RelayCommand]
+        private async Task SelectAudio()
+        {
+            var dialog = new OpenFileDialog { Title = "Ses / Medya Dosyası Seç", Filter = AudioFilter };
+            if (dialog.ShowDialog() != true) return;
+
+            AudioPath = dialog.FileName;
+            Log($"Ses kaynağı seçildi: {AudioPath}");
+            await ProbeAudioAsync();
+        }
+
+        private async Task ProbeVideoAsync()
+        {
+            _videoInfo = null;
+            UpdateEstimate();
+            if (!_ffmpeg.CheckFfmpegExists()) return;
+            try
             {
-                VideoPath = dialog.FileName;
-                if (string.IsNullOrWhiteSpace(OutputFolder))
-                    OutputFolder = Path.GetDirectoryName(dialog.FileName) ?? "";
-                Log($"Video seçildi: {VideoPath}");
+                _videoInfo = await _merge.ProbeAsync(VideoPath, CancellationToken.None);
+                Log($"Video: {_videoInfo.FileSize / 1024.0 / 1024.0:0.0} MB, {_videoInfo.EffectiveDuration:hh\\:mm\\:ss}");
+                UpdateEstimate();
+            }
+            catch (Exception ex)
+            {
+                EstimateText = "Video analiz edilemedi.";
+                Log("Video analiz hatası: " + ex.Message);
             }
         }
 
-        [RelayCommand]
-        private void SelectAudio()
+        private async Task ProbeAudioAsync()
         {
-            var dialog = new OpenFileDialog { Title = "Ses / Medya Dosyası Seç", Filter = AudioFilter };
-            if (dialog.ShowDialog() == true)
+            _audioInfo = null;
+            UpdateEstimate();
+            if (!_ffmpeg.CheckFfmpegExists() || string.IsNullOrWhiteSpace(AudioPath)) return;
+            try
             {
-                AudioPath = dialog.FileName;
-                Log($"Ses kaynağı seçildi: {AudioPath}");
+                _audioInfo = await _merge.ProbeAsync(AudioPath, CancellationToken.None);
+                UpdateEstimate();
+            }
+            catch (Exception ex)
+            {
+                Log("Ses analiz hatası: " + ex.Message);
+                UpdateEstimate();
             }
         }
 
@@ -214,7 +303,8 @@ namespace Mp3Converter.ViewModels
                 DurationMode = DurationMode,
                 AudioOffsetMs = AudioOffsetMs,
                 UseMetadataOffset = UseMetadataOffset,
-                AudioBitrateKbps = AudioBitrateKbps
+                AudioBitrateKbps = AudioBitrateKbps,
+                Quality = SelectedQuality.Quality
             };
 
             var progress = new Progress<MergeProgress>(p =>
@@ -234,6 +324,12 @@ namespace Mp3Converter.ViewModels
                 Progress = 100;
                 Stage = MergeStage.Completed;
                 StatusMessage = "Tamamlandı";
+                try
+                {
+                    long bytes = new FileInfo(result.OutputPath).Length;
+                    StatusMessage = $"Tamamlandı: {bytes / 1024.0 / 1024.0:0.0} MB";
+                }
+                catch { }
                 Log($"Tamamlandı: {result.OutputPath}");
             }
             catch (OperationCanceledException)

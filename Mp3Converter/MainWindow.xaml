@@ -8,7 +8,7 @@
         xmlns:views="clr-namespace:Mp3Converter.Views"
         xmlns:sys="clr-namespace:System;assembly=System.Runtime"
         mc:Ignorable="d"
-        Title="Media Converter — Dönüştür / Birleştir / Küçült" Height="700" Width="960" MinHeight="580" MinWidth="840"
+        Title="Media Converter — Dönüştür / Birleştir / Küçült / Kırp" Height="720" Width="980" MinHeight="580" MinWidth="840"
         WindowStartupLocation="CenterScreen"
         WindowState="Normal"
         ShowInTaskbar="True"
@@ -180,6 +180,10 @@
 
         <TabItem Header="  Video Küçült  ">
             <views:CompressView DataContext="{Binding Compress}" Margin="8"/>
+        </TabItem>
+
+        <TabItem Header="  Video Kırp  ">
+            <views:TrimView DataContext="{Binding Trim}" Margin="8"/>
         </TabItem>
         </TabControl>
 

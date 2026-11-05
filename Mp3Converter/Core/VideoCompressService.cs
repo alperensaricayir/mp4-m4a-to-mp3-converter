@@ -224,17 +224,32 @@ namespace Mp3Converter.Core
                 Directory.CreateDirectory(o.OutputFolder);
                 outputPath = BuildOutputPath(o.VideoPath, o.OutputFolder);
 
+                // Two-pass x264 writes a huge .mbtree next to the pass log. On a 32 GB source
+                // that file plus millions of FFmpeg warnings used to crash the app near the end.
+                bool twoPass = o.TwoPass && info.FileSize < LargeFileBytes && info.EffectiveDuration.TotalHours < 1.5;
+                if (o.TwoPass && !twoPass)
+                    log?.Invoke("Büyük video: iki geçiş kapatıldı (tek geçiş ABR). Temp dosya ve bellek çökmesi önlenir.");
+
+                // +faststart rewrites the whole MP4 at the end (needs a second copy on disk).
+                bool faststart = est.EstimatedBytes < 1_500_000_000L;
+                string movFlags = faststart ? "-movflags +faststart" : "";
+                if (!faststart)
+                    log?.Invoke("Büyük çıktı: faststart atlandı (sonda dosyanın yeniden yazılması atlanır).");
+
+                EnsureDiskSpace(o.OutputFolder, est.EstimatedBytes, twoPass, faststart);
+
                 string vf = est.OutputHeight.HasValue ? $"-vf scale=-2:{est.OutputHeight.Value} " : "";
                 int maxrate = (int)(est.VideoBitrateKbps * 1.5);
-                int bufsize = est.VideoBitrateKbps * 3;
-                string videoArgs = $"-c:v libx264 -preset medium -b:v {est.VideoBitrateKbps}k -maxrate {maxrate}k -bufsize {bufsize}k -pix_fmt yuv420p {vf}";
+                int bufsize = Math.Max(est.VideoBitrateKbps * 2, est.VideoBitrateKbps + 200);
+                // mbtree=0 keeps two-pass stats tiny; still used as a safety net if two-pass stays on.
+                string videoArgs = $"-c:v libx264 -preset medium -b:v {est.VideoBitrateKbps}k -maxrate {maxrate}k -bufsize {bufsize}k -pix_fmt yuv420p -x264-params mbtree=0 {vf}";
                 string audioArgs = !est.HasAudio ? "-an"
                     : est.CopyAudio ? "-c:a copy"
                     : $"-c:a aac -b:a {est.AudioBitrateKbps}k";
 
                 TimeSpan duration = info.EffectiveDuration;
 
-                if (o.TwoPass)
+                if (twoPass)
                 {
                     string pass1 = $"-hide_banner -y -i \"{o.VideoPath}\" -map 0:v:0 {videoArgs}-pass 1 -passlogfile \"{passLog}\" -an -f null NUL";
                     log?.Invoke("ffmpeg " + pass1);
@@ -248,10 +263,10 @@ namespace Mp3Converter.Core
                         throw new MergeException("1. geçiş başarısız oldu: " + d, d);
                     }
 
-                    string pass2 = $"-hide_banner -y -i \"{o.VideoPath}\" -map 0:v:0 -map 0:a:0? {videoArgs}-pass 2 -passlogfile \"{passLog}\" {audioArgs} -movflags +faststart \"{outputPath}\"";
+                    string pass2 = $"-hide_banner -y -i \"{o.VideoPath}\" -map 0:v:0 -map 0:a:0? {videoArgs}-pass 2 -passlogfile \"{passLog}\" {audioArgs} {movFlags} \"{outputPath}\"";
                     log?.Invoke("ffmpeg " + pass2);
                     Report(progress, CompressStage.Encoding, 50, "2. geçiş (sıkıştırma)...");
-                    var p2 = new Progress<double>(p => Report(progress, CompressStage.Encoding, 50 + p / 2, $"2. geçiş (sıkıştırma)... %{p:0}"));
+                    var p2 = new Progress<double>(p => Report(progress, CompressStage.Encoding, 50 + p / 2, p >= 99 ? "MP4 sonlandırılıyor..." : $"2. geçiş (sıkıştırma)... %{p:0}"));
                     var r2 = await _ffmpeg.RunFfmpegAsync(pass2, duration, p2, log, ct);
                     if (r2.Cancelled || ct.IsCancellationRequested) throw new OperationCanceledException(ct);
                     if (!r2.Success)
@@ -262,10 +277,10 @@ namespace Mp3Converter.Core
                 }
                 else
                 {
-                    string args = $"-hide_banner -y -i \"{o.VideoPath}\" -map 0:v:0 -map 0:a:0? {videoArgs}{audioArgs} -movflags +faststart \"{outputPath}\"";
+                    string args = $"-hide_banner -y -i \"{o.VideoPath}\" -map 0:v:0 -map 0:a:0? {videoArgs}{audioArgs} {movFlags} \"{outputPath}\"";
                     log?.Invoke("ffmpeg " + args);
                     Report(progress, CompressStage.Encoding, 0, "Sıkıştırılıyor...");
-                    var pr = new Progress<double>(p => Report(progress, CompressStage.Encoding, p, $"Sıkıştırılıyor... %{p:0}"));
+                    var pr = new Progress<double>(p => Report(progress, CompressStage.Encoding, p, p >= 99 ? "MP4 sonlandırılıyor..." : $"Sıkıştırılıyor... %{p:0}"));
                     var r = await _ffmpeg.RunFfmpegAsync(args, duration, pr, log, ct);
                     if (r.Cancelled || ct.IsCancellationRequested) throw new OperationCanceledException(ct);
                     if (!r.Success)
@@ -315,6 +330,28 @@ namespace Mp3Converter.Core
                 TryDelete(passLog + "-0.log.temp");
                 TryDelete(passLog + "-0.log.mbtree.temp");
             }
+        }
+
+        private const long LargeFileBytes = 1_500_000_000; // 1.5 GB
+
+        private static void EnsureDiskSpace(string folder, long estimatedBytes, bool twoPass, bool faststart)
+        {
+            try
+            {
+                string? root = Path.GetPathRoot(Path.GetFullPath(folder));
+                if (string.IsNullOrEmpty(root)) return;
+                var drive = new DriveInfo(root);
+                long need = estimatedBytes + 80L * 1024 * 1024;
+                if (faststart) need += estimatedBytes;
+                if (twoPass) need += 80L * 1024 * 1024;
+                if (drive.AvailableFreeSpace < need)
+                {
+                    throw new MergeException(
+                        $"Diskte yeterli alan yok. Gerekli ≈ {need / 1024.0 / 1024.0:0} MB, boş {drive.AvailableFreeSpace / 1024.0 / 1024.0:0} MB ({drive.Name}).");
+                }
+            }
+            catch (MergeException) { throw; }
+            catch { /* DriveInfo can fail on some UNC paths; ffmpeg will error if disk fills. */ }
         }
 
         private static void Report(IProgress<CompressProgress>? p, CompressStage stage, double percent, string message) =>

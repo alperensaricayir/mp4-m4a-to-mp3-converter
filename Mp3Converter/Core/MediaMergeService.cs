@@ -33,6 +33,28 @@ namespace Mp3Converter.Core
         Error
     }
 
+    public enum MergeQuality
+    {
+        Same,
+        VeryHigh,
+        High,
+        Medium,
+        Low
+    }
+
+    public sealed class MergeEstimate
+    {
+        public long EstimatedBytes { get; init; }
+        public long SourceVideoBytes { get; init; }
+        public bool CopyVideo { get; init; }
+        public int VideoBitrateKbps { get; init; }
+        public int AudioBitrateKbps { get; init; }
+        public int Crf { get; init; }
+        public string? Warning { get; init; }
+        public double EstimatedMb => EstimatedBytes / 1024.0 / 1024.0;
+        public double SourceVideoMb => SourceVideoBytes / 1024.0 / 1024.0;
+    }
+
     public sealed class MergeOptions
     {
         public string VideoPath { get; init; } = "";
@@ -45,6 +67,7 @@ namespace Mp3Converter.Core
         /// <summary>Add (audio.start_time - video.start_time) from container metadata to the offset.</summary>
         public bool UseMetadataOffset { get; init; }
         public int AudioBitrateKbps { get; init; } = 192;
+        public MergeQuality Quality { get; init; } = MergeQuality.Same;
     }
 
     public sealed class MergeProgress
@@ -98,6 +121,95 @@ namespace Mp3Converter.Core
         public static string GetExtension(MergeContainer container) =>
             container == MergeContainer.Mp4 ? ".mp4" : ".mkv";
 
+        public Task<MediaInfo> ProbeAsync(string path, CancellationToken ct) => _probe.ProbeAsync(path, ct);
+
+        public static int QualityFactorPercent(MergeQuality q) => q switch
+        {
+            MergeQuality.Same => 100,
+            MergeQuality.VeryHigh => 100,
+            MergeQuality.High => 75,
+            MergeQuality.Medium => 50,
+            MergeQuality.Low => 28,
+            _ => 50
+        };
+
+        public static int QualityCrf(MergeQuality q) => q switch
+        {
+            MergeQuality.Same => 18,
+            MergeQuality.VeryHigh => 16,
+            MergeQuality.High => 20,
+            MergeQuality.Medium => 23,
+            MergeQuality.Low => 28,
+            _ => 23
+        };
+
+        /// <summary>
+        /// Predicts merged output size from the video file's MB (video stream share) plus the replacement audio.
+        /// Cheap — call whenever quality / container / files change, before Merge is clicked.
+        /// </summary>
+        public static MergeEstimate Estimate(MediaInfo video, MediaInfo? audio, MergeQuality quality, MergeContainer container, int audioBitrateKbps)
+        {
+            if (!video.HasVideo)
+                return new MergeEstimate { SourceVideoBytes = video.FileSize, Warning = "Video akışı bulunamadı." };
+
+            double seconds = video.EffectiveDuration.TotalSeconds;
+            if (seconds <= 0)
+                return new MergeEstimate { SourceVideoBytes = video.FileSize, Warning = "Video süresi okunamadı." };
+
+            long srcVideoBps = video.EstimatedVideoBitRate;
+            long srcAudioBps = video.HasAudio ? video.EstimatedAudioBitRate : 0;
+            long srcTotal = srcVideoBps + srcAudioBps;
+            double videoShare = srcTotal > 0 ? (double)srcVideoBps / srcTotal : 1.0;
+            long videoStreamBytes = (long)(video.FileSize * videoShare);
+            if (videoStreamBytes <= 0) videoStreamBytes = video.FileSize;
+
+            int outAudioKbps = audioBitrateKbps > 0 ? audioBitrateKbps : 192;
+            if (audio?.FirstAudio != null)
+            {
+                bool copyAudio = quality == MergeQuality.Same
+                                 && (container == MergeContainer.Mkv || Mp4AudioCodecs.Contains(audio.FirstAudio.CodecName));
+                if (copyAudio && audio.EstimatedAudioBitRate > 0)
+                    outAudioKbps = (int)Math.Max(32, audio.EstimatedAudioBitRate / 1000);
+            }
+
+            bool copyVideo = quality == MergeQuality.Same
+                             && (container == MergeContainer.Mkv || Mp4VideoCodecs.Contains(video.FirstVideo!.CodecName));
+
+            int videoKbps;
+            int crf = QualityCrf(quality);
+            string? warning = null;
+
+            if (copyVideo)
+            {
+                videoKbps = srcVideoBps > 0 ? (int)Math.Max(1, srcVideoBps / 1000) : 0;
+            }
+            else
+            {
+                if (srcVideoBps <= 0) srcVideoBps = 2_000_000;
+                videoKbps = (int)Math.Round(srcVideoBps / 1000.0 * QualityFactorPercent(quality) / 100.0);
+                if (videoKbps < 100) videoKbps = 100;
+                if (container == MergeContainer.Mp4 && quality == MergeQuality.Same)
+                    warning = "MP4 için görüntü codec'i kopyalanamıyor; yeniden encode edilecek.";
+            }
+
+            long videoBytes = copyVideo
+                ? videoStreamBytes
+                : (long)(videoKbps * 1000.0 * seconds / 8.0);
+            long audioBytes = (long)(outAudioKbps * 1000.0 * seconds / 8.0);
+            long est = (long)((videoBytes + audioBytes) * 1.02);
+
+            return new MergeEstimate
+            {
+                EstimatedBytes = Math.Max(est, 1024),
+                SourceVideoBytes = video.FileSize,
+                CopyVideo = copyVideo,
+                VideoBitrateKbps = videoKbps,
+                AudioBitrateKbps = outAudioKbps,
+                Crf = crf,
+                Warning = warning
+            };
+        }
+
         /// <summary>"Video_BIRLESMIS.mkv", then "_2", "_3", ... never overwriting.</summary>
         public static string BuildOutputPath(string videoPath, string outputFolder, MergeContainer container) =>
             FfmpegService.GetUniqueSuffixedPath(outputFolder, Path.GetFileNameWithoutExtension(videoPath) + "_BIRLESMIS", GetExtension(container));
@@ -149,27 +261,28 @@ namespace Mp3Converter.Core
                 log?.Invoke($"Uygulanacak toplam ses offseti: {offsetMs:+0;-0;0} ms");
 
                 // ---------- 3) Codec decisions ----------
-                bool copyVideo, copyAudio;
-                if (options.Container == MergeContainer.Mkv)
+                bool wantCopy = options.Quality == MergeQuality.Same;
+                bool copyVideo = wantCopy && (options.Container == MergeContainer.Mkv || Mp4VideoCodecs.Contains(videoStream.CodecName));
+                bool copyAudio = wantCopy && (options.Container == MergeContainer.Mkv || Mp4AudioCodecs.Contains(audioStream.CodecName));
+
+                string videoCodecArgs;
+                if (copyVideo)
                 {
-                    copyVideo = true;
-                    copyAudio = true;
+                    videoCodecArgs = "-c:v copy";
                 }
                 else
                 {
-                    copyVideo = Mp4VideoCodecs.Contains(videoStream.CodecName);
-                    copyAudio = Mp4AudioCodecs.Contains(audioStream.CodecName);
+                    int crf = QualityCrf(options.Quality);
+                    videoCodecArgs = $"-c:v libx264 -preset medium -crf {crf} -pix_fmt yuv420p -x264-params mbtree=0";
                 }
 
-                string videoCodecArgs = copyVideo
-                    ? "-c:v copy"
-                    : "-c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p";
                 string audioCodecArgs = copyAudio
                     ? "-c:a copy"
                     : $"-c:a aac -b:a {options.AudioBitrateKbps}k";
 
-                log?.Invoke($"Video codec: {videoStream.CodecName} → {(copyVideo ? "stream copy" : "libx264 (yeniden encode; MP4 ile uyumsuz)")}");
-                log?.Invoke($"Ses codec:   {audioStream.CodecName} → {(copyAudio ? "stream copy" : $"aac {options.AudioBitrateKbps}k (yeniden encode)")}");
+                log?.Invoke($"Kalite: {options.Quality}");
+                log?.Invoke($"Video codec: {videoStream.CodecName} → {(copyVideo ? "stream copy" : $"libx264 CRF {QualityCrf(options.Quality)}")}");
+                log?.Invoke($"Ses codec:   {audioStream.CodecName} → {(copyAudio ? "stream copy" : $"aac {options.AudioBitrateKbps}k")}");
 
                 // ---------- 4) Optional temp extraction ----------
                 string audioInput = options.AudioPath;

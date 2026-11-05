@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -222,9 +223,9 @@ namespace Mp3Converter.Core
         }
 
         /// <summary>
-        /// Runs ffmpeg with the given arguments off the UI thread, parses "time=" from stderr
-        /// into percentage progress against <paramref name="totalDuration"/>, and supports cancellation
-        /// by killing the process.
+        /// Runs ffmpeg off the UI thread. Progress is read from <c>-progress pipe:1</c> (stdout)
+        /// at a throttled rate so a multi-hour encode cannot flood the dispatcher or grow the log.
+        /// Stderr is kept as a short tail of real errors; per-frame warnings are discarded.
         /// </summary>
         public async Task<FfmpegRunResult> RunFfmpegAsync(
             string arguments,
@@ -235,27 +236,101 @@ namespace Mp3Converter.Core
         {
             string ffmpeg = FfmpegPath ?? throw new InvalidOperationException("FFmpeg bulunamadı.");
 
+            // Machine-readable progress on stdout; hide per-frame stats/warnings that
+            // previously filled RAM and crashed the UI near the end of long encodes.
+            string args = arguments.Contains("-progress ", StringComparison.Ordinal)
+                ? arguments
+                : "-nostats -loglevel error -progress pipe:1 " + arguments;
+
+            var utf8 = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: false);
             var startInfo = new ProcessStartInfo
             {
                 FileName = ffmpeg,
-                Arguments = arguments,
+                Arguments = args,
                 UseShellExecute = false,
                 RedirectStandardError = true,
                 RedirectStandardOutput = true,
                 CreateNoWindow = true,
-                StandardErrorEncoding = System.Text.Encoding.UTF8
+                StandardErrorEncoding = utf8,
+                StandardOutputEncoding = utf8
             };
 
             using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
 
             var tail = new Queue<string>();
             const int tailSize = 40;
+            int loggedErrors = 0;
+            long lastProgressTicks = 0;
+            double lastPercent = -1;
 
             if (!process.Start())
                 throw new InvalidOperationException("FFmpeg işlemi başlatılamadı.");
 
-            // Drain stdout so ffmpeg never blocks on a full pipe.
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
+            try { process.PriorityClass = ProcessPriorityClass.BelowNormal; } catch { }
+
+            void Remember(string line)
+            {
+                lock (tail)
+                {
+                    tail.Enqueue(line);
+                    while (tail.Count > tailSize) tail.Dequeue();
+                }
+            }
+
+            void MaybeReport(double percent)
+            {
+                if (progress == null) return;
+                long now = Environment.TickCount64;
+                if (percent < 99.5 && now - lastProgressTicks < 250 && Math.Abs(percent - lastPercent) < 0.25)
+                    return;
+                lastProgressTicks = now;
+                lastPercent = percent;
+                progress.Report(Math.Clamp(percent, 0, 100));
+            }
+
+            // stdout: key=value progress records. Never buffer the whole stream.
+            var stdoutTask = Task.Run(async () =>
+            {
+                try
+                {
+                    string? line;
+                    while ((line = await process.StandardOutput.ReadLineAsync()) != null)
+                    {
+                        if (progress == null || totalDuration.TotalSeconds <= 0) continue;
+
+                        double seconds = -1;
+                        if (line.StartsWith("out_time_us=", StringComparison.Ordinal)
+                            && long.TryParse(line.AsSpan(12), NumberStyles.Integer, CultureInfo.InvariantCulture, out long us)
+                            && us >= 0)
+                        {
+                            seconds = us / 1_000_000.0;
+                        }
+                        else if (line.StartsWith("out_time_ms=", StringComparison.Ordinal)
+                                 && long.TryParse(line.AsSpan(12), NumberStyles.Integer, CultureInfo.InvariantCulture, out long ms)
+                                 && ms >= 0)
+                        {
+                            seconds = ms / 1000.0;
+                        }
+                        else if (line.StartsWith("out_time=", StringComparison.Ordinal))
+                        {
+                            var m = TimeRegex.Match("time=" + line.Substring(9));
+                            if (m.Success)
+                            {
+                                seconds = double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) * 3600
+                                          + double.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture) * 60
+                                          + double.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture);
+                            }
+                        }
+
+                        if (seconds >= 0)
+                            MaybeReport(seconds / totalDuration.TotalSeconds * 100);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine("ffmpeg stdout reader: " + ex.Message);
+                }
+            });
 
             var stderrTask = Task.Run(async () =>
             {
@@ -264,25 +339,14 @@ namespace Mp3Converter.Core
                     string? line;
                     while ((line = await process.StandardError.ReadLineAsync()) != null)
                     {
-                        lock (tail)
-                        {
-                            tail.Enqueue(line);
-                            while (tail.Count > tailSize) tail.Dequeue();
-                        }
+                        if (string.IsNullOrWhiteSpace(line) || IsProgressLine(line)) continue;
+                        Remember(line);
 
-                        log?.Invoke(line);
-
-                        if (progress != null && totalDuration.TotalSeconds > 0)
+                        // Cap forwarded errors: a 32 GB file can emit millions of DTS warnings.
+                        if (log != null && loggedErrors < 30 && LooksLikeError(line))
                         {
-                            var m = TimeRegex.Match(line);
-                            if (m.Success)
-                            {
-                                double h = double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
-                                double mi = double.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture);
-                                double s = double.Parse(m.Groups[3].Value, CultureInfo.InvariantCulture);
-                                double current = h * 3600 + mi * 60 + s;
-                                progress.Report(Math.Clamp(current / totalDuration.TotalSeconds * 100, 0, 100));
-                            }
+                            loggedErrors++;
+                            log(line);
                         }
                     }
                 }
@@ -305,7 +369,7 @@ namespace Mp3Converter.Core
             }
             finally
             {
-                try { await Task.WhenAll(stderrTask, stdoutTask).WaitAsync(TimeSpan.FromSeconds(5)); } catch { }
+                try { await Task.WhenAll(stderrTask, stdoutTask).WaitAsync(TimeSpan.FromSeconds(8)); } catch { }
             }
 
             string[] tailCopy;
@@ -345,12 +409,26 @@ namespace Mp3Converter.Core
             return candidate;
         }
 
+        private static bool IsProgressLine(string line)
+        {
+            var l = line.TrimStart();
+            return l.StartsWith("frame=") || l.StartsWith("size=") || (l.Contains("time=") && l.Contains("bitrate="));
+        }
+
+        private static bool LooksLikeError(string line)
+        {
+            var l = line.ToLowerInvariant();
+            return l.Contains("error") || l.Contains("failed") || l.Contains("invalid")
+                   || l.Contains("not found") || l.Contains("denied") || l.Contains("no space")
+                   || l.Contains("could not") || l.Contains("unable to") || l.Contains("cannot");
+        }
+
         public static string LastMeaningfulLine(IReadOnlyList<string> lines)
         {
             for (int i = lines.Count - 1; i >= 0; i--)
             {
                 var l = lines[i].Trim();
-                if (l.Length > 0 && !l.StartsWith("frame=") && !l.StartsWith("size=")) return l;
+                if (l.Length > 0 && !IsProgressLine(l)) return l;
             }
             return "(no output)";
         }
