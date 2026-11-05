@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ders Slayt Yakalayıcı</title>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #1a2130;
+    --panel2: #222b3d;
+    --accent: #4f8cff;
+    --accent2: #7c5cff;
+    --text: #e8ecf4;
+    --muted: #94a0b8;
+    --ok: #3ecf8e;
+    --warn: #f5c542;
+    --err: #ff6b6b;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px 16px 60px;
+  }
+  .container { max-width: 980px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 24px; }
+  header h1 {
+    font-size: 1.9rem;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin-bottom: 6px;
+  }
+  header p { color: var(--muted); font-size: 0.95rem; max-width: 720px; margin: 0 auto; line-height: 1.5; }
+
+  #dropzone {
+    border: 2px dashed #3a4a68;
+    border-radius: var(--radius);
+    background: var(--panel);
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    margin: 18px 0;
+  }
+  #dropzone.dragover { border-color: var(--accent); background: #1e2a42; }
+  #dropzone .icon { font-size: 2.5rem; margin-bottom: 8px; }
+  #dropzone .main { font-size: 1.05rem; margin-bottom: 6px; }
+  #dropzone .sub { color: var(--muted); font-size: 0.85rem; }
+  #fileInput { display: none; }
+
+  .controls {
+    display: none;
+    background: var(--panel);
+    border: 1px solid #263144;
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 16px;
+    gap: 16px;
+  }
+  .controls.visible { display: grid; }
+  .file-list { color: var(--muted); font-size: 0.88rem; display: grid; gap: 4px; }
+  .file-list strong { color: var(--text); }
+  .sliders { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 680px) { .sliders { grid-template-columns: 1fr; } }
+  .slider label { display: flex; justify-content: space-between; font-size: 0.86rem; margin-bottom: 6px; }
+  .slider span { color: var(--muted); }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .hint { color: var(--muted); font-size: 0.78rem; margin-top: 4px; }
+
+  button {
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    color: #fff;
+    border: none;
+    border-radius: 9px;
+    padding: 10px 18px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { opacity: .92; }
+  button.secondary { background: var(--panel2); border: 1px solid #334059; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .progress-wrap { display: none; margin-bottom: 16px; }
+  .progress-wrap.visible { display: block; }
+  .status { font-size: 0.9rem; margin-bottom: 8px; color: var(--muted); }
+  .status.error { color: var(--err); }
+  .bar { height: 8px; background: #2a3550; border-radius: 4px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .15s; }
+
+  .summary {
+    display: none;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .summary.visible { display: flex; }
+  .summary h2 { font-size: 1.05rem; }
+
+  .week {
+    margin-bottom: 22px;
+  }
+  .week h3 {
+    font-size: 0.92rem;
+    color: var(--muted);
+    margin: 0 0 10px 2px;
+    font-weight: 600;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .shot {
+    background: var(--panel);
+    border: 1px solid #263144;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .shot img { width: 100%; aspect-ratio: 16/9; object-fit: contain; background: #000; display: block; }
+  .shot .meta { padding: 10px 12px 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .shot .time { font-size: 0.86rem; }
+  .shot .delta { color: var(--muted); font-size: 0.75rem; }
+  .shot button { padding: 6px 10px; font-size: 0.78rem; }
+
+  .note { color: var(--warn); font-size: 0.86rem; margin-bottom: 12px; display: none; }
+  .note.visible { display: block; }
+
+  video, canvas.off { display: none; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>🎬 Ders Slayt Yakalayıcı</h1>
+    <p>Saatlerce ekran kaydını izlemenize gerek yok. Videoyu tarar, fareyi yok sayar, slayt durunca ekran görüntüsü alır. Dört haftalık dersi birden yükleyebilirsiniz.</p>
+  </header>
+
+  <div id="dropzone">
+    <div class="icon">🎥</div>
+    <div class="main">Ders videolarını buraya sürükleyin veya tıklayıp seçin</div>
+    <div class="sub">Birden fazla MP4/WEBM seçebilirsiniz • 1 saatlik video yaklaşık 4 dakikada taranır • Video bu cihazdan çıkmaz</div>
+  </div>
+  <input type="file" id="fileInput" accept="video/*" multiple>
+
+  <div class="controls" id="controls">
+    <div class="file-list" id="fileList"></div>
+    <div class="sliders">
+      <div class="slider">
+        <label>Ne kadar küçük değişim alınsın? <span id="sensLabel">Madde / slayt</span></label>
+        <input type="range" id="sensitivity" min="15" max="85" value="48">
+        <div class="hint">Düşük: yalnızca yeni slayt. Yüksek: yeni madde satırı da alınır. Fare hareketi yok sayılır.</div>
+      </div>
+      <div class="slider">
+        <label>Slayt oturunca bekle <span id="gapLabel">0.8 sn</span></label>
+        <input type="range" id="minGap" min="4" max="20" value="8">
+        <div class="hint">Animasyon bitsin, sonra kare alınsın. Aynı slaytın onlarca kopyasını keser.</div>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="startBtn">Slaytları çıkar</button>
+      <button class="secondary" id="cancelBtn" disabled>İptal</button>
+    </div>
+  </div>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="status" id="status">Hazır</div>
+    <div class="bar"><div id="bar"></div></div>
+  </div>
+
+  <div class="summary" id="summary">
+    <h2 id="summaryTitle">Ekran görüntüleri</h2>
+    <div class="actions">
+      <button id="zipBtn" disabled>⬇️ Tümünü ZIP indir</button>
+      <button class="secondary" id="clearBtn">🗑️ Temizle</button>
+    </div>
+  </div>
+  <div class="note" id="note"></div>
+  <div id="results"></div>
+</div>
+
+<video id="video" muted playsinline></video>
+<canvas id="sample" class="off"></canvas>
+<canvas id="full" class="off"></canvas>
+
+<script>
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const controls = document.getElementById('controls');
+  const fileListEl = document.getElementById('fileList');
+  const sensitivity = document.getElementById('sensitivity');
+  const minGap = document.getElementById('minGap');
+  const sensLabel = document.getElementById('sensLabel');
+  const gapLabel = document.getElementById('gapLabel');
+  const startBtn = document.getElementById('startBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
+  const progressWrap = document.getElementById('progressWrap');
+  const statusEl = document.getElementById('status');
+  const barEl = document.getElementById('bar');
+  const summary = document.getElementById('summary');
+  const summaryTitle = document.getElementById('summaryTitle');
+  const zipBtn = document.getElementById('zipBtn');
+  const noteEl = document.getElementById('note');
+  const results = document.getElementById('results');
+  const video = document.getElementById('video');
+  const sampleCanvas = document.getElementById('sample');
+  const fullCanvas = document.getElementById('full');
+  const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+  const fullCtx = fullCanvas.getContext('2d');
+
+  const SW = 160;
+  const SH = 90;
+  const COLS = 16;
+  const ROWS = 9;
+  sampleCanvas.width = SW;
+  sampleCanvas.height = SH;
+
+  let queue = [];
+  let objectUrl = null;
+  let shots = [];
+  let runToken = 0;
+  let cancelRequested = false;
+  const groups = new Map();
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', e => {
+    addFiles(e.target.files);
+    fileInput.value = '';
+  });
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    addFiles(e.dataTransfer.files);
+  });
+
+  sensitivity.addEventListener('input', updateLabels);
+  minGap.addEventListener('input', updateLabels);
+  updateLabels();
+
+  function updateLabels() {
+    const s = Number(sensitivity.value);
+    sensLabel.textContent = s < 35 ? 'Yalnızca slayt' : s < 65 ? 'Madde / slayt' : 'Küçük yazı da';
+    gapLabel.textContent = (Number(minGap.value) / 10).toFixed(1) + ' sn';
+  }
+
+  function thresholdFromSensitivity() {
+    const s = Number(sensitivity.value);
+    return 0.013 - ((s - 15) / 70) * 0.009;
+  }
+
+  function addFiles(fileList) {
+    const videos = [...fileList].filter(f => f.type.startsWith('video/') || /\.(mp4|webm|mkv|mov|m4v)$/i.test(f.name));
+    if (!videos.length) return;
+    queue = queue.concat(videos.map(file => ({ file, duration: null })));
+    renderQueue();
+    controls.classList.add('visible');
+    progressWrap.classList.add('visible');
+    setStatus(queue.length + ' video hazır. Slaytları çıkarmak için başlatın.');
+    startBtn.disabled = false;
+  }
+
+  function renderQueue() {
+    fileListEl.innerHTML = queue.map((item, i) => {
+      const dur = item.duration ? ' • ' + formatTime(item.duration) : '';
+      return '<div>' + (i + 1) + '. <strong>' + escapeHtml(item.file.name) + '</strong>' + dur + '</div>';
+    }).join('') || '<div>Video yok</div>';
+  }
+
+  function folderName(file, index) {
+    const base = file.name.replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]+/g, '-');
+    return String(index + 1).padStart(2, '0') + '-' + (base || 'ders');
+  }
+
+  startBtn.addEventListener('click', () => { if (queue.length) analyzeAll(); });
+  cancelBtn.addEventListener('click', () => {
+    cancelRequested = true;
+    cancelBtn.disabled = true;
+    video.pause();
+  });
+
+  async function analyzeAll() {
+    const token = ++runToken;
+    cancelRequested = false;
+    clearShots();
+    startBtn.disabled = true;
+    cancelBtn.disabled = false;
+    summary.classList.remove('visible');
+    noteEl.classList.remove('visible');
+
+    const gap = Number(minGap.value) / 10;
+    const threshold = thresholdFromSensitivity();
+
+    try {
+      for (let i = 0; i < queue.length; i++) {
+        if (cancelRequested || token !== runToken) break;
+        const item = queue[i];
+        const folder = folderName(item.file, i);
+        setStatus((i + 1) + '/' + queue.length + ' • ' + item.file.name + ' açılıyor…');
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        objectUrl = URL.createObjectURL(item.file);
+        await setVideoSource(objectUrl);
+        const duration = await ensureDuration();
+        item.duration = duration;
+        renderQueue();
+        const group = ensureGroup(folder, item.file.name);
+        await analyzeVideo(duration, gap, threshold, token, folder, group, i, queue.length);
+      }
+      if (cancelRequested || token !== runToken) {
+        setStatus('Tarama iptal edildi.');
+        return;
+      }
+      summary.classList.add('visible');
+      summaryTitle.textContent = shots.length + ' slayt karesi • ' + queue.length + ' video';
+      zipBtn.disabled = shots.length === 0;
+      if (shots.length <= queue.length) {
+        noteEl.textContent = 'Çok az kare çıktı. Hassasiyeti biraz yükseltip yeniden deneyin. Fare yine yok sayılır.';
+        noteEl.classList.add('visible');
+      }
+      setStatus('Tamamlandı. ' + shots.length + ' slayt karesi kaydedildi.');
+      setProgress(1);
+    } catch (err) {
+      console.error(err);
+      setStatus(err.message || 'Tarama başarısız oldu.', true);
+    } finally {
+      video.pause();
+      if (token === runToken) {
+        startBtn.disabled = !queue.length;
+        cancelBtn.disabled = true;
+      }
+    }
+  }
+
+  async function analyzeVideo(duration, gap, threshold, token, folder, group, index, total) {
+    video.pause();
+    await scanBySeeking(duration, gap, threshold, token, folder, group, index, total);
+  }
+
+  function scanWhilePlaying(duration, rate, gap, threshold, token, folder, group, index, total) {
+    return new Promise(resolve => {
+      const detector = makeDetector(gap, threshold, folder, group);
+      let settled = false;
+      let lastSample = -Infinity;
+      let lastTick = performance.now();
+      let samples = 0;
+      const finish = async () => {
+        if (settled) return;
+        settled = true;
+        clearInterval(stallWatch);
+        video.removeEventListener('ended', onEnded);
+        video.pause();
+        await detector.flush(duration);
+        resolve();
+      };
+      const onEnded = () => finish();
+      video.addEventListener('ended', onEnded);
+      const stallWatch = setInterval(() => {
+        if (performance.now() - lastTick > 12000) finish();
+      }, 500);
+
+      const pump = (now, metadata) => {
+        if (settled || cancelRequested || token !== runToken) { finish(); return; }
+        lastTick = performance.now();
+        const t = Number.isFinite(metadata.mediaTime) ? metadata.mediaTime : video.currentTime;
+        if (t - lastSample >= 0.22) {
+          lastSample = t;
+          samples++;
+          detector.observe(t, captureSignature());
+          const local = duration ? Math.min(1, t / duration) : 0;
+          setProgress((index + local) / total);
+          setStatus((index + 1) + '/' + total + ' taranıyor… %' + Math.round(local * 100) + ' • ' + shots.length + ' slayt • ' + rate + 'x');
+        }
+        if (t >= duration - 0.08) { finish(); return; }
+        if (!settled) video.requestVideoFrameCallback(pump);
+      };
+      video.requestVideoFrameCallback(pump);
+    });
+  }
+
+  async function scanBySeeking(duration, gap, threshold, token, folder, group, index, total) {
+    const detector = makeDetector(gap, threshold, folder, group);
+    const step = duration > 90 ? 1 : duration > 20 ? 0.6 : 0.35;
+    const last = Math.max(0, duration - 0.12);
+    let i = 0;
+    for (let t = 0; t <= last; t += step) {
+      if (cancelRequested || token !== runToken) return;
+      await seekTo(t);
+      detector.observe(video.currentTime || t, captureSignature());
+      i++;
+      const local = last ? t / last : 1;
+      setProgress((index + local) / total);
+      if (i % 3 === 0) setStatus((index + 1) + '/' + total + ' taranıyor… %' + Math.round(local * 100) + ' • ' + shots.length + ' slayt');
+    }
+    await detector.flush(duration);
+  }
+
+  function makeDetector(gap, threshold, folder, group) {
+    let baseline = null;
+    let candidate = null;
+    let stableFor = 0;
+    let lastTime = 0;
+    let lastShotTime = -Infinity;
+    let captureChain = Promise.resolve();
+    const settle = Math.max(0.25, gap * 0.55);
+
+    function captureAt(t, score) {
+      if (t - lastShotTime < gap && shots.length) return captureChain;
+      lastShotTime = t;
+      captureChain = captureChain.then(async () => {
+        const blob = await captureFullFrame();
+        addShot({ time: t, diff: score, blob, folder, group });
+      }).catch(err => console.error(err));
+      return captureChain;
+    }
+
+    return {
+      observe(t, sig) {
+        const dt = lastTime ? Math.max(0, t - lastTime) : 0;
+        lastTime = t;
+        if (!baseline) {
+          if (isBlank(sig)) return;
+          baseline = sig;
+          captureAt(t, 0);
+          return;
+        }
+        const vsBase = changeScore(baseline, sig);
+        if (vsBase < threshold) {
+          candidate = null;
+          stableFor = 0;
+          return;
+        }
+        if (!candidate) {
+          candidate = { sig, time: t, score: vsBase };
+          stableFor = 0;
+          return;
+        }
+        const vsCand = changeScore(candidate.sig, sig);
+        if (vsCand < Math.max(0.004, threshold * 0.35)) {
+          stableFor += dt;
+          candidate.sig = sig;
+          candidate.time = t;
+          if (stableFor >= settle) {
+            captureAt(candidate.time, candidate.score);
+            baseline = sig;
+            candidate = null;
+            stableFor = 0;
+          }
+        } else {
+          candidate = { sig, time: t, score: Math.max(candidate.score, vsBase) };
+          stableFor = 0;
+        }
+      },
+      async flush(t) {
+        if (candidate) {
+          captureAt(candidate.time || t, candidate.score);
+          candidate = null;
+        }
+        await captureChain;
+      }
+    };
+  }
+
+  function captureSignature() {
+    sampleCtx.drawImage(video, 0, 0, SW, SH);
+    return { data: new Uint8Array(sampleCtx.getImageData(0, 0, SW, SH).data) };
+  }
+
+  function isBlank(sig) {
+    let sum = 0;
+    let n = 0;
+    for (let i = 0; i < sig.data.length; i += 32) {
+      sum += sig.data[i] + sig.data[i + 1] + sig.data[i + 2];
+      n += 3;
+    }
+    return sum / n < 12;
+  }
+
+  function changeScore(a, b) {
+    let changed = 0;
+    const n = a.data.length / 4;
+    for (let i = 0; i < a.data.length; i += 4) {
+      const d = (
+        Math.abs(a.data[i] - b.data[i]) +
+        Math.abs(a.data[i + 1] - b.data[i + 1]) +
+        Math.abs(a.data[i + 2] - b.data[i + 2])
+      ) / 3;
+      if (d > 16) changed++;
+    }
+    return changed / n;
+  }
+
+  function captureFullFrame() {
+    const vw = video.videoWidth || 1280;
+    const vh = video.videoHeight || 720;
+    const maxSide = 1920;
+    const scale = Math.min(1, maxSide / Math.max(vw, vh));
+    const w = Math.max(1, Math.round(vw * scale));
+    const h = Math.max(1, Math.round(vh * scale));
+    fullCanvas.width = w;
+    fullCanvas.height = h;
+    fullCtx.drawImage(video, 0, 0, w, h);
+    return new Promise(resolve => fullCanvas.toBlob(blob => resolve(blob || new Blob()), 'image/jpeg', 0.9));
+  }
+
+  function ensureGroup(folder, label) {
+    if (groups.has(folder)) return groups.get(folder);
+    const wrap = document.createElement('section');
+    wrap.className = 'week';
+    wrap.innerHTML = '<h3></h3><div class="grid"></div>';
+    wrap.querySelector('h3').textContent = label;
+    results.appendChild(wrap);
+    const group = { wrap, grid: wrap.querySelector('.grid'), count: 0 };
+    groups.set(folder, group);
+    return group;
+  }
+
+  function addShot(shot) {
+    const url = URL.createObjectURL(shot.blob);
+    shot.url = url;
+    shots.push(shot);
+    shot.group.count += 1;
+    const index = shot.group.count;
+    const card = document.createElement('article');
+    card.className = 'shot';
+    card.innerHTML = `
+      <a href="${url}" target="_blank" rel="noopener"><img alt="Slayt ${index}"></a>
+      <div class="meta">
+        <div>
+          <div class="time">${index}. slayt • ${formatTime(shot.time)}</div>
+          <div class="delta">${shot.diff ? 'ekranın %' + Math.round(shot.diff * 100) + ' değişti' : 'açılış'}</div>
+        </div>
+        <button type="button">İndir</button>
+      </div>`;
+    card.querySelector('img').src = url;
+    card.querySelector('button').addEventListener('click', () => downloadBlob(shot.blob, shotName(shot)));
+    shot.group.grid.appendChild(card);
+  }
+
+  function shotName(shot) {
+    const stamp = formatTime(shot.time).replace(':', 'm').replace('.', 's');
+    const n = String(shot.group.count).padStart(3, '0');
+    return shot.folder + '/slayt-' + n + '-' + stamp + '.jpg';
+  }
+
+  function clearShots() {
+    shots.forEach(s => URL.revokeObjectURL(s.url));
+    shots = [];
+    groups.clear();
+    results.innerHTML = '';
+    zipBtn.disabled = true;
+    summary.classList.remove('visible');
+    noteEl.classList.remove('visible');
+  }
+
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    cancelRequested = true;
+    runToken++;
+    clearShots();
+    setStatus('Temizlendi. Videolar duruyor, yeniden tarayabilirsiniz.');
+    setProgress(0);
+    startBtn.disabled = !queue.length;
+    cancelBtn.disabled = true;
+  });
+
+  zipBtn.addEventListener('click', async () => {
+    if (!shots.length || typeof JSZip === 'undefined') {
+      setStatus('ZIP hazırlanamadı. Kareleri tek tek indirebilirsiniz.', true);
+      return;
+    }
+    zipBtn.disabled = true;
+    setStatus('ZIP hazırlanıyor…');
+    try {
+      const zip = new JSZip();
+      const used = new Map();
+      shots.forEach(shot => {
+        let name = shotName(shot);
+        const n = (used.get(name) || 0) + 1;
+        used.set(name, n);
+        if (n > 1) name = name.replace(/\.jpg$/, '-' + n + '.jpg');
+        zip.file(name, shot.blob);
+      });
+      const blob = await zip.generateAsync({ type: 'blob' });
+      downloadBlob(blob, 'ders-slaytlari.zip');
+      setStatus('ZIP indirildi.');
+    } catch (err) {
+      setStatus(err.message || 'ZIP oluşturulamadı.', true);
+    } finally {
+      zipBtn.disabled = shots.length === 0;
+    }
+  });
+
+  function setVideoSource(url) {
+    return new Promise((resolve, reject) => {
+      const onReady = () => { cleanup(); resolve(); };
+      const onError = () => { cleanup(); reject(new Error('Bu video dosyası açılamadı.')); };
+      const cleanup = () => {
+        video.removeEventListener('loadedmetadata', onReady);
+        video.removeEventListener('error', onError);
+      };
+      video.addEventListener('loadedmetadata', onReady);
+      video.addEventListener('error', onError);
+      video.src = url;
+      video.load();
+    });
+  }
+
+  async function ensureDuration() {
+    if (isFinite(video.duration) && video.duration > 0 && video.duration < 1e6) return video.duration;
+    await seekTo(1e101);
+    const d = video.duration;
+    await seekTo(0);
+    if (!isFinite(d) || d <= 0) throw new Error('Video süresi okunamadı.');
+    return d;
+  }
+
+  function seekTo(time) {
+    return new Promise(resolve => {
+      const target = Math.max(0, Math.min(time, Math.max(0, (video.duration || time) - 0.04)));
+      if (Math.abs(video.currentTime - target) < 0.02) {
+        resolve();
+        return;
+      }
+      const timer = setTimeout(done, 3000);
+      function done() {
+        clearTimeout(timer);
+        video.removeEventListener('seeked', done);
+        resolve();
+      }
+      video.addEventListener('seeked', done);
+      try { video.currentTime = target; }
+      catch { done(); }
+    });
+  }
+
+  function nextFrame() {
+    return new Promise(resolve => requestAnimationFrame(resolve));
+  }
+
+  function downloadBlob(blob, filename) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  function setStatus(text, isError) {
+    statusEl.textContent = text;
+    statusEl.classList.toggle('error', !!isError);
+  }
+
+  function setProgress(p) {
+    barEl.style.width = Math.max(0, Math.min(1, p)) * 100 + '%';
+  }
+
+  function formatTime(t) {
+    if (!isFinite(t) || t < 0) t = 0;
+    const total = Math.floor(t);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const cs = Math.floor((t - total) * 100);
+    const mmss = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + '.' + String(cs).padStart(2, '0');
+    return h ? String(h) + ':' + mmss : mmss;
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+</script>
+</body>
+</html>
